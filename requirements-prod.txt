@@ -1,0 +1,5 @@
+# Production-only extras (installed on top of requirements.txt)
+-r requirements.txt
+
+mysqlclient==2.2.*   # MySQL driver (needs libmysqlclient-dev / default-libmysqlclient-dev)
+gunicorn==23.*       # WSGI server for the Django admin web app

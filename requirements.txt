@@ -1,0 +1,8 @@
+# Core runtime dependencies (dev uses SQLite)
+Django==5.1.15
+python-telegram-bot[job-queue]==21.11.1
+django-environ==0.14.0
+
+# Dev / test
+pytest==8.*
+pytest-django==4.*
