@@ -7,8 +7,9 @@ from asgiref.sync import async_to_sync
 from django.test import Client
 from django.urls import reverse
 
+from bot.handlers.common import variant_card_text
 from bot.handlers.products import _normalize, _similar_products
-from inventory.models import Product
+from inventory.models import DigikalaCode, Product, ProductVariant
 
 
 def _similar(name):
@@ -70,6 +71,35 @@ class TestSimilarProducts:
         # The blank name_en on جوجه must not match every candidate.
         hits, _ = _similar("عروسک")
         assert hits == []
+
+    def test_punctuation_only_name_is_not_flagged(self):
+        # A name that normalizes to empty must not match every product via containment.
+        hits, exact = _similar("!!!")
+        assert hits == []
+        assert exact is False
+
+
+@pytest.mark.django_db
+class TestVariantCardEscaping:
+    """The variant card renders with parse_mode='HTML', so user-entered values must be
+    HTML-escaped — otherwise a '<' or '&' (e.g. a product named "Tom & Jerry") would make
+    Telegram reject the whole message."""
+
+    def test_name_label_and_dkp_are_escaped(self):
+        product = Product.objects.create(name_fa="عروسک", name_en="Tom & Jerry <3")
+        variant = ProductVariant.objects.create(product=product, color="R&B", size="")
+        DigikalaCode.objects.create(variant=variant, code="A&B")
+
+        text = variant_card_text(variant, "en")
+
+        # Dynamic values escaped...
+        assert "Tom &amp; Jerry &lt;3" in text
+        assert "R&amp;B" in text
+        assert "A&amp;B" in text
+        # ...but the card's own markup is left intact.
+        assert "<b>" in text
+        # No raw, unescaped special char leaked from the user data.
+        assert "Jerry <3" not in text
 
 
 class TestWebhookGating:

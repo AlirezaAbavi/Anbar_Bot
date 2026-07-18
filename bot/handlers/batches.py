@@ -10,6 +10,7 @@ sourced a sale is PROTECTed); it writes off the remaining units through the serv
 audit log and the variant total stay consistent.
 """
 
+import html
 import logging
 
 from asgiref.sync import sync_to_async
@@ -72,8 +73,9 @@ def _load_batch(batch_id):
 
 
 def _list_text(variant, batches, lang):
-    name = variant.product.display_name(lang)
-    label = variant.variant_label() or i18n.t("card.no_variant", lang)
+    # The list title renders as HTML — escape the DB-sourced name/label.
+    name = html.escape(variant.product.display_name(lang))
+    label = html.escape(variant.variant_label() or i18n.t("card.no_variant", lang))
     lines = [i18n.t("batch.list_title", lang, name=f"{name} · {label}")]
     if not batches:
         lines.append(i18n.t("batch.none", lang))
