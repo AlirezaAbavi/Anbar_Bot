@@ -13,14 +13,34 @@ from django.core.management.base import BaseCommand, CommandError
 from telegram import BotCommand, BotCommandScopeAllPrivateChats
 from telegram.ext import ApplicationBuilder
 
+from telegram import Update
+
+from bot import i18n
+from bot.auth import get_user
 from bot.handlers import register_all
 
 logger = logging.getLogger("anbar.bot")
 
 
 async def _on_error(update, context):
-    """Log any exception raised while handling an update, so failures aren't silent."""
+    """Log any exception raised while handling an update, and tell the user something went
+    wrong so a procedure never ends in silence.
+
+    Without this last step, an unexpected exception (a DB error, a bug) in the middle of a
+    flow would only hit the log — the user would answer the last prompt and then see nothing,
+    which reads as "the bot swallowed my action". A short, generic message closes that gap.
+    Sending it is itself best-effort: if that fails too, we've still logged the original.
+    """
     logger.error("Error handling update %s", update, exc_info=context.error)
+
+    if not isinstance(update, Update) or update.effective_chat is None:
+        return
+    try:
+        user = await get_user(update.effective_user.id) if update.effective_user else None
+        lang = user.language if user else "fa"
+        await context.bot.send_message(update.effective_chat.id, i18n.t("common.error", lang))
+    except Exception:
+        logger.exception("Failed to notify user of the error above")
 
 
 # Commands for the "/" autocomplete popup (type "/" in the chat to list them; typing "/s"

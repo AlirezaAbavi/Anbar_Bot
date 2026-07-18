@@ -12,6 +12,7 @@ from ..models import Language, Role
 from .common import (
     cq_answer,
     load_variant,
+    product_description_block,
     send_main_menu,
     send_variant_card,
     show_or_edit,
@@ -177,12 +178,16 @@ async def _render_product_variants(update, context, user, product_id, page=0):
         # Plain product with a single (default) variant — skip the one-item list.
         await send_variant_card(update, context, variants[0], user)
         return
-    name = variants[0].product.display_name(lang)
+    product = variants[0].product
+    name = product.display_name(lang)
+    caption = i18n.t("product.variants_of", lang, name=name) + product_description_block(
+        product, lang
+    )
     await show_product_card(
         update,
         context,
-        variants[0].product,
-        i18n.t("product.variants_of", lang, name=name),
+        product,
+        caption,
         keyboards.product_variants(
             variants, lang, user=user, product_id=product_id, page=page, has_next=has_next
         ),

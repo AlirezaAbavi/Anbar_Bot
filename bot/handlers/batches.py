@@ -10,6 +10,8 @@ sourced a sale is PROTECTed); it writes off the remaining units through the serv
 audit log and the variant total stay consistent.
 """
 
+import logging
+
 from asgiref.sync import sync_to_async
 from telegram.ext import (
     CallbackQueryHandler,
@@ -26,6 +28,8 @@ from .. import i18n, keyboards
 from ..auth import get_user
 from ..models import Role
 from .common import fmt_money, menu_fallbacks
+
+logger = logging.getLogger("anbar.bot")
 
 EDIT_BUY, EDIT_SELL = range(2)
 _KEEP = "-"
@@ -177,9 +181,18 @@ async def edit_sell(update, context):
             return EDIT_SELL
         new_sell = int(d)
 
-    variant_id = await _apply_edit(
-        context.user_data["batch_id"], context.user_data.get("new_buy"), new_sell
-    )
+    try:
+        variant_id = await _apply_edit(
+            context.user_data["batch_id"], context.user_data.get("new_buy"), new_sell
+        )
+    except Exception:
+        # Unexpected failure: tell the user and end the flow rather than leaving them
+        # stuck in EDIT_SELL with no reply.
+        logger.exception("Batch price edit failed")
+        await update.effective_message.reply_text(
+            i18n.t("common.error", lang), reply_markup=keyboards.main_menu_button(lang)
+        )
+        return ConversationHandler.END
     await update.effective_message.reply_text(i18n.t("batch.updated", lang))
     await _send_list(update, context, variant_id)
     return ConversationHandler.END
@@ -222,7 +235,14 @@ async def delete_cb(update, context):
         )
         return
 
-    variant_id = await _do_delete(batch_id, user)
+    try:
+        variant_id = await _do_delete(batch_id, user)
+    except Exception:
+        logger.exception("Batch write-off failed")
+        await context.bot.send_message(
+            update.effective_chat.id, i18n.t("common.error", user.language)
+        )
+        return
     await context.bot.send_message(
         update.effective_chat.id, i18n.t("batch.deleted", user.language)
     )

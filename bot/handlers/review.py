@@ -12,6 +12,8 @@ the field last chosen). The ``rv:reset`` confirm and ``/reviewreset`` live outsi
 conversation: the "pass complete" screen that offers them is shown after the flow has ended.
 """
 
+import logging
+
 from asgiref.sync import sync_to_async
 from telegram.ext import (
     CallbackQueryHandler,
@@ -27,7 +29,15 @@ from inventory.models import ProductVariant
 from .. import i18n, keyboards
 from ..auth import get_user
 from ..models import Role
-from .common import cq_answer, fmt_money, menu_fallbacks, show_or_edit
+from .common import (
+    cq_answer,
+    fmt_money,
+    menu_fallbacks,
+    product_description_block,
+    show_or_edit,
+)
+
+logger = logging.getLogger("anbar.bot")
 
 NAV, INPUT = range(2)
 _CLEAR = "-"  # a lone "-" clears an optional text field (English name, color, size)
@@ -151,7 +161,7 @@ def _card_text(product, done, total, lang):
         name_en=product.name_en or _dash(lang),
         category=_cat_label(product, lang),
         variants=vtext,
-    )
+    ) + product_description_block(product, lang)
 
 
 async def _show_card(update, context):
@@ -210,7 +220,16 @@ async def _advance(update, context, after_id, mark):
     the ``after_id`` product reviewed before moving (Save vs Skip)."""
     lang = context.user_data["lang"]
     if mark and after_id is not None:
-        await _mark(after_id, context.user_data.get("tuser"))
+        try:
+            await _mark(after_id, context.user_data.get("tuser"))
+        except Exception:
+            # Couldn't flag this product reviewed: warn (a transient message so the re-render
+            # below doesn't overwrite it) and stay on the same card rather than advancing.
+            logger.exception("Review mark-reviewed failed")
+            await context.bot.send_message(
+                update.effective_chat.id, i18n.t("common.error", lang)
+            )
+            return await _show_card(update, context)
     nxt = await _next(after_id)
     if nxt is not None:
         context.user_data["rv_pid"] = nxt.id
@@ -264,7 +283,13 @@ async def show_dkp(update, context):
 
 async def del_dkp(update, context):
     await update.callback_query.answer()
-    vid = await _remove_dkp_return_vid(int(update.callback_query.data.split(":")[2]))
+    lang = context.user_data["lang"]
+    try:
+        vid = await _remove_dkp_return_vid(int(update.callback_query.data.split(":")[2]))
+    except Exception:
+        logger.exception("Review DKP removal failed")
+        await context.bot.send_message(update.effective_chat.id, i18n.t("common.error", lang))
+        return await _show_card(update, context)
     if vid is None:
         return await _show_card(update, context)
     return await _show_dkp(update, context, vid)
@@ -312,30 +337,39 @@ async def got_input(update, context):
     text = (update.effective_message.text or "").strip()
     kind = edit.get("kind")
 
-    if kind == "name_fa":
-        _, err = await _rename(context.user_data["rv_pid"], name_fa=text)
-        if err:
-            await update.effective_message.reply_text(i18n.t(err, lang))
-        return await _show_card(update, context)
+    try:
+        if kind == "name_fa":
+            _, err = await _rename(context.user_data["rv_pid"], name_fa=text)
+            if err:
+                await update.effective_message.reply_text(i18n.t(err, lang))
+            return await _show_card(update, context)
 
-    if kind == "name_en":
-        await _rename(context.user_data["rv_pid"], name_en=("" if text == _CLEAR else text))
-        return await _show_card(update, context)
+        if kind == "name_en":
+            await _rename(context.user_data["rv_pid"], name_en=("" if text == _CLEAR else text))
+            return await _show_card(update, context)
 
-    if kind == "vf":
-        field, vid = edit["field"], edit["vid"]
-        if field in ("buy", "sell", "thr"):
-            d = _digits(text)
-            if d == "":
-                await update.effective_message.reply_text(i18n.t("review.bad_num", lang))
-                return await _show_variant(update, context, vid)
-            value = int(d)
-        else:
-            value = "" if text == _CLEAR else text
-        _, err = await _update_variant(vid, field, value)
-        if err:
-            await update.effective_message.reply_text(i18n.t(err, lang))
-        return await _show_variant(update, context, vid)
+        if kind == "vf":
+            field, vid = edit["field"], edit["vid"]
+            if field in ("buy", "sell", "thr"):
+                d = _digits(text)
+                if d == "":
+                    await update.effective_message.reply_text(i18n.t("review.bad_num", lang))
+                    return await _show_variant(update, context, vid)
+                value = int(d)
+            else:
+                value = "" if text == _CLEAR else text
+            _, err = await _update_variant(vid, field, value)
+            if err:
+                await update.effective_message.reply_text(i18n.t(err, lang))
+            return await _show_variant(update, context, vid)
+    except Exception:
+        # Unexpected failure applying the typed value: warn and fall back to the product card
+        # rather than leaving the user stuck in INPUT with no reply.
+        logger.exception("Review edit failed")
+        await update.effective_message.reply_text(
+            i18n.t("common.error", lang), reply_markup=keyboards.main_menu_button(lang)
+        )
+        return await _show_card(update, context)
 
     if kind == "dkp":
         vid = edit["vid"]
