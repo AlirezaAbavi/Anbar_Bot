@@ -146,7 +146,7 @@ def product_results(products, lang, query="", page_cb=None, page=0, has_next=Fal
     `page_cb` (e.g. "pg:b" or "pg:s") turns on the pager row.
     """
     rows = [
-        [InlineKeyboardButton(p.display_name(lang)[:60], callback_data=f"p:{p.id}")]
+        [InlineKeyboardButton(p.list_name()[:60], callback_data=f"p:{p.id}")]
         for p in products
     ]
     if page_cb is not None:
@@ -229,7 +229,7 @@ def variant_card_actions(variant, user, back_cb="nav:main"):
 def product_picker(products, lang, short, page=0, has_next=False):
     """Pick a product for a stock action ('in'/'out'); its variant is chosen next."""
     rows = [
-        [InlineKeyboardButton(p.display_name(lang)[:60], callback_data=f"pick:{short}:{p.id}")]
+        [InlineKeyboardButton(p.list_name()[:60], callback_data=f"pick:{short}:{p.id}")]
         for p in products
     ]
     pager = _pager_row(f"pg:pp:{short}", page, has_next, lang)

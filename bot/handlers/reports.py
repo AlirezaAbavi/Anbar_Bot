@@ -24,7 +24,7 @@ def _low_stock(page=0):
     """One page of low-stock rows, plus whether a further page exists."""
     off = page * _PER
     rows = [
-        (v.product.name_fa, v.variant_label(), v.quantity, v.reorder_threshold)
+        (v.product.list_name(), v.variant_label(), v.quantity, v.reorder_threshold)
         for v in low_stock_variants().select_related("product")[off : off + _PER + 1]
     ]
     return rows[:_PER], len(rows) > _PER

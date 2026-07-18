@@ -52,6 +52,15 @@ class Product(models.Model):
             return self.name_en or self.name_fa
         return self.name_fa or self.name_en
 
+    def list_name(self):
+        """Label for list views: '{English} - {Persian}'.
+
+        Falls back to whichever name exists when the other is blank.
+        """
+        if self.name_en and self.name_fa:
+            return f"{self.name_en} - {self.name_fa}"
+        return self.name_en or self.name_fa
+
 
 class ProductVariant(models.Model):
     """The sellable/stocked unit: a product in a specific color and/or size."""

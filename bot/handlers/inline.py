@@ -91,7 +91,7 @@ def _build_product_result(product, lang, user, bot_username):
     """One inline result for a product: a photo/article whose buttons deep-link into the
     bot DM (a variant card, or the Add-variant flow)."""
     variants = list(product.variants.all())
-    title = product.display_name(lang)
+    title = product.list_name()
     header = i18n.t("product.variants_of", lang, name=title)
     description = i18n.t("inline.variant_count", lang, n=len(variants))
     keyboard = _keyboard(product, variants, lang, user, bot_username)
