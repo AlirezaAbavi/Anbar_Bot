@@ -362,6 +362,146 @@ def set_batch_remaining(batch_id, new_remaining, user=None, note="manual correct
     return variant, variant.is_low_stock
 
 
+# --- catalog review / supervision walkthrough -------------------------------------
+# The bot's admin review op (bot/handlers/review.py) walks every product in id order to
+# supervise the imported catalog. Progress is a per-product ``reviewed`` flag, so the pass
+# resumes at the first unreviewed product across sessions rather than storing a cursor.
+
+
+def next_unreviewed_product(after_id=None):
+    """First product still needing review, in id order; None when the pass is complete.
+
+    ``after_id`` walks strictly forward within a pass (Save/Skip → next product by id).
+    Called with no argument (Start / resume) it returns the first unreviewed product
+    overall — which, after a Cancel, is the one the admin was last on.
+    """
+    qs = Product.objects.filter(reviewed=False)
+    if after_id is not None:
+        qs = qs.filter(id__gt=after_id)
+    return qs.order_by("id").first()
+
+
+def review_counts():
+    """(reviewed, total) product counts for the walkthrough's progress line."""
+    total = Product.objects.count()
+    reviewed = Product.objects.filter(reviewed=True).count()
+    return reviewed, total
+
+
+def mark_product_reviewed(product_id, user=None):
+    """Flag a product as supervised, stamping who did it and when."""
+    Product.objects.filter(pk=product_id).update(
+        reviewed=True, reviewed_at=timezone.now(), reviewed_by=user
+    )
+
+
+def reset_reviews():
+    """Clear every product's reviewed flag so the pass starts over. Returns the count."""
+    return Product.objects.filter(reviewed=True).update(
+        reviewed=False, reviewed_at=None, reviewed_by=None
+    )
+
+
+def review_product_detail(product_id):
+    """Load a product with everything the review card renders, or None.
+
+    Shows *all* variants (active or not) and their codes — the whole point of supervision is
+    to surface whatever the import left behind, including variants hidden from browse.
+    """
+    return (
+        Product.objects.select_related("category")
+        .prefetch_related("variants__digikala_codes")
+        .filter(pk=product_id)
+        .first()
+    )
+
+
+def rename_product(product_id, name_fa=None, name_en=None):
+    """Edit a product's names. Returns (product, error) — error is a message key or None.
+
+    Guards ``uniq_product_name_fa``: a blank or already-taken Persian name is rejected so the
+    walkthrough can show the admin why rather than raising. ``name_en`` is free-form.
+    """
+    product = Product.objects.filter(pk=product_id).first()
+    if product is None:
+        return None, "common.not_found"
+    if name_fa is not None:
+        name_fa = name_fa.strip()
+        if not name_fa:
+            return None, "review.err_name_blank"
+        if (
+            Product.objects.filter(name_fa=name_fa).exclude(pk=product_id).exists()
+        ):
+            return None, "review.err_name_taken"
+        product.name_fa = name_fa
+    if name_en is not None:
+        product.name_en = name_en.strip()
+    product.save(update_fields=["name_fa", "name_en", "updated_at"])
+    return product, None
+
+
+# Review-editable variant fields → (attribute, is_price). Quantity is deliberately absent:
+# it must move through adjust_stock, never a direct write.
+_VARIANT_FIELDS = {
+    "color": ("color", False),
+    "size": ("size", False),
+    "buy": ("purchase_price", True),
+    "sell": ("sale_price", True),
+    "thr": ("reorder_threshold", False),
+}
+
+
+def update_variant_field(variant_id, field, value):
+    """Set one review-editable variant field. Returns (variant, error) — error is a key/None.
+
+    ``color``/``size`` are trimmed text; ``buy``/``sell``/``thr`` are ints. A color/size edit
+    that would collide with a sibling variant (uniq_variant_per_product) is rejected. Never
+    touches ``quantity`` — that is adjust_stock's job.
+    """
+    attr, _is_price = _VARIANT_FIELDS[field]
+    variant = ProductVariant.objects.filter(pk=variant_id).first()
+    if variant is None:
+        return None, "common.not_found"
+    if field in ("color", "size"):
+        new_val = (value or "").strip()
+        color = new_val if field == "color" else variant.color
+        size = new_val if field == "size" else variant.size
+        clash = (
+            ProductVariant.objects.filter(
+                product_id=variant.product_id, color=color, size=size
+            )
+            .exclude(pk=variant_id)
+            .exists()
+        )
+        if clash:
+            return None, "review.err_variant_dupe"
+        setattr(variant, attr, new_val)
+    else:
+        setattr(variant, attr, int(value))
+    variant.save(update_fields=[attr, "updated_at"])
+    return variant, None
+
+
+def add_dkp(variant_id, code):
+    """Attach a DigiKala code to a variant. Returns (code_obj, error) — error is a key/None.
+
+    ``code`` is globally unique (one DKP → one variant), so a code already in use anywhere is
+    rejected rather than raising IntegrityError.
+    """
+    code = (code or "").strip()
+    if not code:
+        return None, "review.err_dkp_blank"
+    if DigikalaCode.objects.filter(code=code).exists():
+        return None, "review.err_dkp_taken"
+    obj = DigikalaCode.objects.create(variant_id=variant_id, code=code)
+    return obj, None
+
+
+def remove_dkp(dkp_id):
+    """Delete a DigiKala code by id. Silent no-op if it's already gone."""
+    DigikalaCode.objects.filter(pk=dkp_id).delete()
+
+
 @transaction.atomic
 def create_batch(
     variant_id, quantity, purchase_price, sale_price, received_at=None, note="", user=None

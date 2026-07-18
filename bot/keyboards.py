@@ -26,6 +26,17 @@
   pg:low:<page>                 low-stock report page
   pg:usr:<page>                 manage-users page
 
+  review                        start the admin catalog-review walkthrough (admin)
+  rv:save | rv:skip             mark reviewed & advance | advance without marking
+  rv:nfa | rv:nen               edit the current product's fa / en name
+  rv:v:<variant_id>             open a variant's review sub-hub
+  rv:p                          back to the product review card
+  rv:f:<field>:<variant_id>     edit a variant field (field: color|size|buy|sell|thr)
+  rv:dkp:<variant_id>           a variant's DKP add/remove screen
+  rv:dadd:<variant_id>          add a DKP to the variant
+  rv:ddel:<dkp_id>              remove a DKP
+  rv:reset | rv:reset:yes       clear all reviewed flags, with confirm
+
 The "show as dropdown" button in product_results has no callback_data; it uses
 switch_inline_query_current_chat to open the inline results panel in the same chat.
 """
@@ -69,6 +80,7 @@ MAIN_BUTTONS = [
     ("stockin", "menu.stock_in", Role.STAFF),
     ("stockout", "menu.stock_out", Role.STAFF),
     ("addprod", "menu.add_product", Role.ADMIN),
+    ("review", "menu.review", Role.ADMIN),
     ("users", "menu.manage_users", Role.ADMIN),
     ("lang", "menu.language", Role.VIEWER),
 ]
@@ -78,7 +90,7 @@ _MENU_ROWS = [
     ["search", "products"],
     ["reports", "help"],
     ["stockin", "stockout"],
-    ["addprod"],
+    ["addprod", "review"],
     ["users"],
     ["lang"],
 ]
@@ -286,6 +298,81 @@ def batch_delete_confirm(batch, lang):
                     i18n.t("btn.back", lang), callback_data=f"b:{batch.variant_id}"
                 ),
             ]
+        ]
+    )
+
+
+def review_card(product, lang):
+    """The product review card's keyboard: edit-name buttons, one button per variant
+    (drilling into its sub-hub), then Save / Skip and a 🏠 exit that keeps the place.
+
+    ``product`` must have ``variants`` prefetched (review_product_detail does this)."""
+    rows = [
+        [
+            InlineKeyboardButton(i18n.t("review.btn_name_fa", lang), callback_data="rv:nfa"),
+            InlineKeyboardButton(i18n.t("review.btn_name_en", lang), callback_data="rv:nen"),
+        ]
+    ]
+    for v in product.variants.all():
+        label = v.variant_label() or i18n.t("card.no_variant", lang)
+        rows.append(
+            [InlineKeyboardButton(f"✏️ {label} ({v.quantity})"[:60], callback_data=f"rv:v:{v.id}")]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(i18n.t("review.btn_save", lang), callback_data="rv:save"),
+            InlineKeyboardButton(i18n.t("review.btn_skip", lang), callback_data="rv:skip"),
+        ]
+    )
+    rows.append([InlineKeyboardButton(i18n.t("btn.main_menu", lang), callback_data="nav:main")])
+    return InlineKeyboardMarkup(rows)
+
+
+def review_variant(variant, lang):
+    """A variant's review sub-hub: edit each field, open the DKP screen, back to product."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(i18n.t("review.btn_color", lang), callback_data=f"rv:f:color:{variant.id}"),
+                InlineKeyboardButton(i18n.t("review.btn_size", lang), callback_data=f"rv:f:size:{variant.id}"),
+            ],
+            [
+                InlineKeyboardButton(i18n.t("review.btn_buy", lang), callback_data=f"rv:f:buy:{variant.id}"),
+                InlineKeyboardButton(i18n.t("review.btn_sell", lang), callback_data=f"rv:f:sell:{variant.id}"),
+            ],
+            [InlineKeyboardButton(i18n.t("review.btn_thr", lang), callback_data=f"rv:f:thr:{variant.id}")],
+            [InlineKeyboardButton(i18n.t("review.btn_dkp", lang), callback_data=f"rv:dkp:{variant.id}")],
+            [InlineKeyboardButton(i18n.t("review.btn_back_product", lang), callback_data="rv:p")],
+        ]
+    )
+
+
+def review_dkp(variant, codes, lang):
+    """A variant's DKP screen: tap a code to remove it, add a new one, or go back."""
+    rows = [
+        [InlineKeyboardButton(f"🗑 {c.code}"[:60], callback_data=f"rv:ddel:{c.id}")]
+        for c in codes
+    ]
+    rows.append([InlineKeyboardButton(i18n.t("review.btn_dkp_add", lang), callback_data=f"rv:dadd:{variant.id}")])
+    rows.append([InlineKeyboardButton(i18n.t("review.btn_back_variant", lang), callback_data=f"rv:v:{variant.id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def review_done(lang):
+    """Shown when the pass ends: restart the whole review, or return to the main menu."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(i18n.t("review.btn_reset", lang), callback_data="rv:reset")],
+            [InlineKeyboardButton(i18n.t("btn.main_menu", lang), callback_data="nav:main")],
+        ]
+    )
+
+
+def review_reset_confirm(lang):
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(i18n.t("review.btn_reset_yes", lang), callback_data="rv:reset:yes")],
+            [InlineKeyboardButton(i18n.t("btn.main_menu", lang), callback_data="nav:main")],
         ]
     )
 

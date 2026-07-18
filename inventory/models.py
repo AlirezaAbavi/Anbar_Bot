@@ -33,6 +33,17 @@ class Product(models.Model):
     telegram_file_id = models.CharField(max_length=256, blank=True)
 
     is_active = models.BooleanField(default=True)
+
+    # Admin supervision pass over the imported catalog: the review walkthrough
+    # (bot/handlers/review.py) steps through products in id order, flipping ``reviewed`` on
+    # Save so it can resume at the first still-unreviewed product across sessions.
+    reviewed = models.BooleanField(default=False, db_index=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        "bot.TelegramUser", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
