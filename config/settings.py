@@ -22,6 +22,7 @@ env = environ.Env(
     INLINE_RESULT_STYLE=(str, "photo"),
     DEPLOY_SECRET=(str, ""),
     WSGI_RELOAD_PATH=(str, ""),
+    PYTHON_BIN=(str, ""),
 )
 # Read .env if present (dev). In prod, real environment variables take precedence.
 environ.Env.read_env(BASE_DIR / ".env")
@@ -66,6 +67,9 @@ DEPLOY_SECRET = env("DEPLOY_SECRET")
 # Absolute path to touch to reload the web worker after a deploy. On PythonAnywhere
 # this is /var/www/<domain>_wsgi.py. Empty -> the reload step is skipped (e.g. in dev).
 WSGI_RELOAD_PATH = env("WSGI_RELOAD_PATH")
+# Interpreter used to run manage.py in the deploy step. Empty -> derived from sys.prefix.
+# Override only if that's wrong (under uWSGI sys.executable is the server binary, not python).
+PYTHON_BIN = env("PYTHON_BIN")
 
 # --- Applications ----------------------------------------------------------------
 INSTALLED_APPS = [

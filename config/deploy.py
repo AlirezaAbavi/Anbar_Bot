@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fcntl
 import hmac
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -62,7 +63,9 @@ def deploy(request):
         return JsonResponse({"error": "forbidden"}, status=403)
 
     base = str(settings.BASE_DIR)
-    py = sys.executable
+    # NOT sys.executable: under uWSGI/mod_wsgi that is the server binary, not python.
+    # Derive the venv interpreter from sys.prefix; PYTHON_BIN overrides if that's wrong.
+    py = settings.PYTHON_BIN or os.path.join(sys.prefix, "bin", "python3")
     manage = str(Path(settings.BASE_DIR) / "manage.py")
     # Run in order; the first failure aborts and is reported with its output.
     steps = [
