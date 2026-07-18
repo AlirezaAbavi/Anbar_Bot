@@ -482,6 +482,28 @@ def update_variant_field(variant_id, field, value):
     return variant, None
 
 
+def set_variant_quantity(variant_id, target, user=None, note="review correction"):
+    """Set a variant's on-hand quantity to ``target`` during catalog review.
+
+    Returns (variant, error) — error is an i18n key or None, matching update_variant_field so
+    the review handler can treat every field uniformly. Never writes ``quantity`` directly:
+    the correction is reconciled through :func:`adjust_stock`, so it still row-locks, records a
+    :class:`StockMovement`, and keeps batches consistent. An increase records an IN (a new batch
+    at the variant's default prices), a decrease an ADJUST (FIFO drain), like set_batch_remaining.
+    """
+    if target < 0:
+        return None, "review.bad_num"
+    variant = ProductVariant.objects.filter(pk=variant_id).first()
+    if variant is None:
+        return None, "common.not_found"
+    delta = target - variant.quantity
+    if delta == 0:
+        return variant, None
+    mtype = StockMovement.Type.IN if delta > 0 else StockMovement.Type.ADJUST
+    variant, _low = adjust_stock(variant_id, mtype, abs(delta), user=user, note=note)
+    return variant, None
+
+
 def add_dkp(variant_id, code):
     """Attach a DigiKala code to a variant. Returns (code_obj, error) — error is a key/None.
 

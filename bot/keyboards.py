@@ -340,7 +340,10 @@ def review_variant(variant, lang):
                 InlineKeyboardButton(i18n.t("review.btn_buy", lang), callback_data=f"rv:f:buy:{variant.id}"),
                 InlineKeyboardButton(i18n.t("review.btn_sell", lang), callback_data=f"rv:f:sell:{variant.id}"),
             ],
-            [InlineKeyboardButton(i18n.t("review.btn_thr", lang), callback_data=f"rv:f:thr:{variant.id}")],
+            [
+                InlineKeyboardButton(i18n.t("review.btn_thr", lang), callback_data=f"rv:f:thr:{variant.id}"),
+                InlineKeyboardButton(i18n.t("review.btn_qty", lang), callback_data=f"rv:f:qty:{variant.id}"),
+            ],
             [InlineKeyboardButton(i18n.t("review.btn_dkp", lang), callback_data=f"rv:dkp:{variant.id}")],
             [InlineKeyboardButton(i18n.t("review.btn_back_product", lang), callback_data="rv:p")],
         ]

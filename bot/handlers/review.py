@@ -48,6 +48,7 @@ _FIELD_PROMPT = {
     "buy": "review.ask_buy",
     "sell": "review.ask_sell",
     "thr": "review.ask_thr",
+    "qty": "review.ask_qty",
 }
 
 
@@ -62,6 +63,7 @@ _mark = sync_to_async(services.mark_product_reviewed)
 _reset = sync_to_async(services.reset_reviews)
 _rename = sync_to_async(services.rename_product)
 _update_variant = sync_to_async(services.update_variant_field)
+_set_qty = sync_to_async(services.set_variant_quantity)
 _add_dkp = sync_to_async(services.add_dkp)
 
 
@@ -350,7 +352,7 @@ async def got_input(update, context):
 
         if kind == "vf":
             field, vid = edit["field"], edit["vid"]
-            if field in ("buy", "sell", "thr"):
+            if field in ("buy", "sell", "thr", "qty"):
                 d = _digits(text)
                 if d == "":
                     await update.effective_message.reply_text(i18n.t("review.bad_num", lang))
@@ -358,7 +360,11 @@ async def got_input(update, context):
                 value = int(d)
             else:
                 value = "" if text == _CLEAR else text
-            _, err = await _update_variant(vid, field, value)
+            if field == "qty":
+                # Routed through adjust_stock (IN/ADJUST), never a direct quantity write.
+                _, err = await _set_qty(vid, value, context.user_data.get("tuser"))
+            else:
+                _, err = await _update_variant(vid, field, value)
             if err:
                 await update.effective_message.reply_text(i18n.t(err, lang))
             return await _show_variant(update, context, vid)
@@ -451,7 +457,7 @@ def register(application):
                 CallbackQueryHandler(edit_name, pattern="^rv:n(fa|en)$"),
                 CallbackQueryHandler(show_variant, pattern=r"^rv:v:\d+$"),
                 CallbackQueryHandler(back_product, pattern="^rv:p$"),
-                CallbackQueryHandler(edit_field, pattern=r"^rv:f:(color|size|buy|sell|thr):\d+$"),
+                CallbackQueryHandler(edit_field, pattern=r"^rv:f:(color|size|buy|sell|thr|qty):\d+$"),
                 CallbackQueryHandler(show_dkp, pattern=r"^rv:dkp:\d+$"),
                 CallbackQueryHandler(add_dkp_prompt, pattern=r"^rv:dadd:\d+$"),
                 CallbackQueryHandler(del_dkp, pattern=r"^rv:ddel:\d+$"),
