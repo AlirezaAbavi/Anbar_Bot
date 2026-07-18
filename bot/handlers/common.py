@@ -182,9 +182,14 @@ def product_description_block(product, lang):
 
 
 def variant_card_text(variant, lang):
-    """Build the variant detail card text. `variant` must have product + codes loaded."""
-    name = variant.product.display_name(lang)
-    label = variant.variant_label() or i18n.t("card.no_variant", lang)
+    """Build the variant detail card text. `variant` must have product + codes loaded.
+
+    Cards render with parse_mode='HTML', so any user-entered value (names, colour/size,
+    DKP codes) is HTML-escaped — an unescaped ``<``/``&`` (e.g. a product named "Tom &
+    Jerry") would otherwise make Telegram reject the whole message.
+    """
+    name = html.escape(variant.product.display_name(lang))
+    label = html.escape(variant.variant_label() or i18n.t("card.no_variant", lang))
     lines = [f"🧸 <b>{name}</b> · {label}"]
 
     stock_line = f"{i18n.t('card.stock', lang)}: <b>{variant.quantity}</b>"
@@ -209,7 +214,7 @@ def variant_card_text(variant, lang):
         price_line += "  " + i18n.t("card.more_lots", lang, n=len(batches) - 1)
     lines.append(price_line)
 
-    codes = ", ".join(c.code for c in variant.digikala_codes.all())
+    codes = ", ".join(html.escape(c.code) for c in variant.digikala_codes.all())
     if codes:
         lines.append(f"{i18n.t('card.dkp', lang)}: {codes}")
     return "\n".join(lines) + product_description_block(variant.product, lang)

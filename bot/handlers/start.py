@@ -1,5 +1,7 @@
 """/start, language selection, main-menu navigation, product browse, variant card."""
 
+import html
+
 from asgiref.sync import sync_to_async
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, CommandHandler
@@ -179,7 +181,8 @@ async def _render_product_variants(update, context, user, product_id, page=0):
         await send_variant_card(update, context, variants[0], user)
         return
     product = variants[0].product
-    name = product.display_name(lang)
+    # The header renders as HTML; escape the name so a "<"/"&" can't break it.
+    name = html.escape(product.display_name(lang))
     caption = i18n.t("product.variants_of", lang, name=name) + product_description_block(
         product, lang
     )

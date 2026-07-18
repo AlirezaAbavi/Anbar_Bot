@@ -124,6 +124,11 @@ def _similar_products(name):
     ye/kaf, ZWNJ, spacing), so names are normalised before comparing.
     """
     target = _normalize(name)
+    if not target:
+        # A name that normalises to nothing (only punctuation/emoji) has no meaningful
+        # comparison; skip it so the ``target in other`` containment check below doesn't
+        # match ("" is a substring of everything) and flag every product as a duplicate.
+        return [], False
     hits = []
     exact = False
     for p in Product.objects.only("id", "name_fa", "name_en"):
@@ -200,11 +205,6 @@ def _save_product_photo(product_id, file_id, data):
     if data is not None:
         p.photo_data = bytes(data)  # raw JPEG bytes, stored in-DB (no file on disk)
     p.save(update_fields=["telegram_file_id", "photo_data"])
-
-
-@sync_to_async
-def _product_name(product_id):
-    return Product.objects.get(pk=product_id).name_fa
 
 
 @sync_to_async
@@ -469,7 +469,13 @@ async def got_more(update, context):
         return await _start_variant(update, context)
 
     lang = context.user_data["lang"]
-    name = await _product_name(context.user_data["product_id"])
+    name = await _product_name_or_none(context.user_data["product_id"])
+    if name is None:
+        # Product vanished mid-flow (concurrent delete) — end cleanly rather than crash.
+        await update.callback_query.message.reply_text(
+            i18n.t("common.not_found", lang), reply_markup=keyboards.main_menu_button(lang)
+        )
+        return ConversationHandler.END
     existing = context.user_data.get("existing_product")
     key = "variant_saved" if existing else "saved"
     await update.callback_query.message.reply_text(
