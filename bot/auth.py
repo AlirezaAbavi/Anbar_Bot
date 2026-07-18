@@ -50,6 +50,19 @@ def list_admins():
     return list(TelegramUser.objects.filter(role=Role.ADMIN, is_active=True))
 
 
+@sync_to_async
+def list_staff_and_admins(exclude_id=None):
+    """Active users who should hear about stock/catalog changes: STAFF and ADMIN.
+
+    ``exclude_id`` drops one telegram id (the user who performed the action, who already
+    saw the result) so a broadcast doesn't notify its own author.
+    """
+    qs = TelegramUser.objects.filter(is_active=True, role__in=[Role.STAFF, Role.ADMIN])
+    if exclude_id is not None:
+        qs = qs.exclude(telegram_id=exclude_id)
+    return list(qs)
+
+
 async def reply(update, text, **kwargs):
     """Reply to either a message or a callback-query update."""
     if update.callback_query:

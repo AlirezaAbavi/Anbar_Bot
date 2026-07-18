@@ -1,5 +1,7 @@
 """Shared display helpers used across handlers."""
 
+import html
+
 from asgiref.sync import sync_to_async
 from telegram import ReplyKeyboardRemove
 from telegram.error import BadRequest
@@ -9,7 +11,31 @@ from inventory.models import Product, ProductVariant
 from inventory.services import active_batches_prefetch
 
 from .. import i18n, keyboards
-from ..auth import get_user
+from ..auth import get_user, list_staff_and_admins
+
+
+def _actor_label(actor):
+    """A human name for the user who performed an action, for broadcast messages."""
+    if actor is None:
+        return "?"
+    return actor.first_name or actor.username or str(actor.telegram_id)
+
+
+async def notify_staff(context, actor, key, **fmt):
+    """Broadcast a localized alert to every active STAFF/ADMIN except ``actor``.
+
+    Used at the end of an important procedure (new product, stock in/out) so the rest of
+    the team hears about it. Each recipient gets the message in their own language; the
+    actor's own name is inserted via ``by``. Per-recipient send failures (blocked bot,
+    never opened a chat) are swallowed so one bad recipient can't break the loop.
+    """
+    fmt.setdefault("by", _actor_label(actor))
+    exclude_id = actor.telegram_id if actor is not None else None
+    for user in await list_staff_and_admins(exclude_id):
+        try:
+            await context.bot.send_message(user.telegram_id, i18n.t(key, user.language, **fmt))
+        except Exception:
+            pass
 
 
 async def cq_answer(update):
@@ -145,6 +171,16 @@ def load_variant(variant_id):
     )
 
 
+def product_description_block(product, lang):
+    """A product's free-text description as an HTML-safe block to append under a card, or
+    '' when it has none. Escaped because cards render with parse_mode='HTML'; the description
+    is on Product (shared by its variants), so it reads the same on any of them."""
+    desc = (product.description or "").strip()
+    if not desc:
+        return ""
+    return f"\n\n<b>{i18n.t('card.description', lang)}:</b>\n{html.escape(desc)}"
+
+
 def variant_card_text(variant, lang):
     """Build the variant detail card text. `variant` must have product + codes loaded."""
     name = variant.product.display_name(lang)
@@ -176,7 +212,7 @@ def variant_card_text(variant, lang):
     codes = ", ".join(c.code for c in variant.digikala_codes.all())
     if codes:
         lines.append(f"{i18n.t('card.dkp', lang)}: {codes}")
-    return "\n".join(lines)
+    return "\n".join(lines) + product_description_block(variant.product, lang)
 
 
 async def _send_photo_card(update, context, product, caption, markup):

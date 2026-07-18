@@ -5,6 +5,8 @@ Two ways in:
   • From a variant card ("in:<id>"/"out:<id>") -> straight to quantity.
 """
 
+import logging
+
 from asgiref.sync import sync_to_async
 from telegram.ext import (
     CallbackQueryHandler,
@@ -27,7 +29,9 @@ from inventory.services import (
 from .. import i18n, keyboards
 from ..auth import get_user, list_admins
 from ..models import Role
-from .common import fmt_money, menu_fallbacks, show_or_edit
+from .common import fmt_money, menu_fallbacks, notify_staff, show_or_edit
+
+logger = logging.getLogger("anbar.bot")
 
 PICK, PRODUCT, VARIANT, QTY, BUY, SELL = range(6)
 
@@ -316,11 +320,31 @@ async def _finish_perform(update, context):
             str(e), reply_markup=keyboards.main_menu_button(lang)
         )
         return QTY
+    except Exception:
+        # An unexpected failure (DB error, bug): tell the user and end the flow rather than
+        # leaving them stuck in this state with no reply. The global error handler logs too,
+        # but only ending here frees the conversation.
+        logger.exception("Stock adjustment failed")
+        await update.effective_message.reply_text(
+            i18n.t("common.error", lang), reply_markup=keyboards.main_menu_button(lang)
+        )
+        return ConversationHandler.END
 
     done_key = "stock.done_in" if mtype == StockMovement.Type.IN else "stock.done_out"
     await update.effective_message.reply_text(
         i18n.t(done_key, lang, qty=result["qty"]),
         reply_markup=keyboards.main_menu_button(lang),
+    )
+
+    # Tell the rest of the team about this movement (everyone but whoever did it).
+    notify_key = "notify.stock_in" if mtype == StockMovement.Type.IN else "notify.stock_out"
+    await notify_staff(
+        context,
+        context.user_data["tuser"],
+        notify_key,
+        name=result["name"],
+        qty=context.user_data["qty"],
+        balance=result["qty"],
     )
 
     if result["low"]:

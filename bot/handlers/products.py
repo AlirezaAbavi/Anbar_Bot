@@ -22,7 +22,7 @@ from inventory.services import adjust_stock
 from .. import i18n, keyboards
 from ..auth import get_user
 from ..models import Role
-from .common import cq_answer, menu_fallbacks, show_or_edit
+from .common import cq_answer, menu_fallbacks, notify_staff, show_or_edit
 
 (NAME_FA, NAME_DUP, NAME_EN, CATEGORY, P_PHOTO, V_COLOR, V_SIZE, V_QTY, V_PURCHASE,
  V_SALE, V_THRESHOLD, V_DKP, MORE) = range(13)
@@ -470,10 +470,15 @@ async def got_more(update, context):
 
     lang = context.user_data["lang"]
     name = await _product_name(context.user_data["product_id"])
-    key = "variant_saved" if context.user_data.get("existing_product") else "saved"
+    existing = context.user_data.get("existing_product")
+    key = "variant_saved" if existing else "saved"
     await update.callback_query.message.reply_text(
         _p(key, lang).format(name=name), reply_markup=keyboards.main_menu_button(lang)
     )
+
+    # Let the rest of the team know a product (or a new variant) was added.
+    notify_key = "notify.variant_added" if existing else "notify.product_added"
+    await notify_staff(context, context.user_data.get("tuser"), notify_key, name=name)
     return ConversationHandler.END
 
 

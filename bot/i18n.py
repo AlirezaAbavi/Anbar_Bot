@@ -15,6 +15,10 @@ STRINGS = {
     "common.cancelled": {"fa": "لغو شد.", "en": "Cancelled."},
     "common.not_found": {"fa": "چیزی پیدا نشد.", "en": "Nothing found."},
     "common.choose": {"fa": "یک گزینه را انتخاب کنید:", "en": "Choose an option:"},
+    "common.error": {
+        "fa": "⚠️ خطایی رخ داد و عملیات کامل نشد. لطفاً دوباره تلاش کنید.",
+        "en": "⚠️ Something went wrong and the action didn't complete. Please try again.",
+    },
 
     # --- auth ---
     "auth.welcome_pending": {
@@ -110,6 +114,7 @@ STRINGS = {
     "card.buy": {"fa": "خرید", "en": "Buy"},
     "card.sell": {"fa": "فروش", "en": "Sell"},
     "card.dkp": {"fa": "کد دیجی‌کالا", "en": "DKP"},
+    "card.description": {"fa": "توضیحات", "en": "Description"},
     "card.no_variant": {"fa": "بدون تنوع", "en": "default"},
     "card.more_lots": {"fa": "(+{n} دستهٔ دیگر)", "en": "(+{n} more)"},
     "card.btn_in": {"fa": "➕ ورود", "en": "➕ In"},
@@ -146,6 +151,24 @@ STRINGS = {
     "stock.low_alert": {
         "fa": "⚠️ هشدار کمبود موجودی:\n{name}\nموجودی: {qty} (حد آستانه: {threshold})",
         "en": "⚠️ Low-stock alert:\n{name}\nStock: {qty} (threshold: {threshold})",
+    },
+
+    # --- team alerts (broadcast to other staff/admins after a procedure) ---
+    "notify.stock_in": {
+        "fa": "📥 ورود کالا: {name}\nتعداد: {qty} — موجودی جدید: {balance}\nتوسط: {by}",
+        "en": "📥 Stock In: {name}\nQty: {qty} — new stock: {balance}\nby: {by}",
+    },
+    "notify.stock_out": {
+        "fa": "📤 خروج کالا: {name}\nتعداد: {qty} — موجودی جدید: {balance}\nتوسط: {by}",
+        "en": "📤 Stock Out: {name}\nQty: {qty} — new stock: {balance}\nby: {by}",
+    },
+    "notify.product_added": {
+        "fa": "🆕 محصول جدید ثبت شد: {name}\nتوسط: {by}",
+        "en": "🆕 New product added: {name}\nby: {by}",
+    },
+    "notify.variant_added": {
+        "fa": "🆕 تنوع جدید به «{name}» اضافه شد.\nتوسط: {by}",
+        "en": "🆕 New variant added to “{name}”.\nby: {by}",
     },
 
     # --- reports ---
