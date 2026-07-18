@@ -4,83 +4,27 @@
 
 Reads BOT_TOKEN from settings (env). All DB access inside handlers goes through
 sync_to_async wrappers, so the async PTB loop and Django's sync ORM coexist safely.
+
+This is one of two delivery modes (see ``BOT_MODE`` in settings); the other is the webhook
+view in ``bot/views.py``. Only one may be active at a time — Telegram rejects ``getUpdates``
+while a webhook is set (409) — so this command refuses to run when ``BOT_MODE=webhook``.
+The shared Application wiring lives in ``bot/application.py``.
 """
 
 import logging
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
-from telegram import BotCommand, BotCommandScopeAllPrivateChats
-from telegram.ext import ApplicationBuilder
 
-from telegram import Update
-
-from bot import i18n
-from bot.auth import get_user
-from bot.handlers import register_all
+from bot.application import build_application, set_commands
 
 logger = logging.getLogger("anbar.bot")
 
 
-async def _on_error(update, context):
-    """Log any exception raised while handling an update, and tell the user something went
-    wrong so a procedure never ends in silence.
-
-    Without this last step, an unexpected exception (a DB error, a bug) in the middle of a
-    flow would only hit the log — the user would answer the last prompt and then see nothing,
-    which reads as "the bot swallowed my action". A short, generic message closes that gap.
-    Sending it is itself best-effort: if that fails too, we've still logged the original.
-    """
-    logger.error("Error handling update %s", update, exc_info=context.error)
-
-    if not isinstance(update, Update) or update.effective_chat is None:
-        return
-    try:
-        user = await get_user(update.effective_user.id) if update.effective_user else None
-        lang = user.language if user else "fa"
-        await context.bot.send_message(update.effective_chat.id, i18n.t("common.error", lang))
-    except Exception:
-        logger.exception("Failed to notify user of the error above")
-
-
-# Commands for the "/" autocomplete popup (type "/" in the chat to list them; typing "/s"
-# filters to commands starting with "s"). Mirrors the main menu's unrestricted actions.
-_COMMANDS = {
-    "en": [
-        BotCommand("menu", "Main menu"),
-        BotCommand("search", "Search products"),
-        BotCommand("products", "Browse products"),
-        BotCommand("reports", "Reports"),
-        BotCommand("help", "Help"),
-        BotCommand("cancel", "Cancel the current step"),
-        BotCommand("start", "Restart the bot"),
-    ],
-    "fa": [
-        BotCommand("menu", "منوی اصلی"),
-        BotCommand("search", "جستجوی محصول"),
-        BotCommand("products", "مرور محصولات"),
-        BotCommand("reports", "گزارش‌ها"),
-        BotCommand("help", "راهنما"),
-        BotCommand("cancel", "لغو مرحله فعلی"),
-        BotCommand("start", "شروع دوباره"),
-    ],
-}
-
-
-async def _set_commands(application):
-    # Populates the "/" command autocomplete. The no-language call is the universal
-    # fallback; the en/fa calls are per-locale. We set en explicitly (not just as the
-    # fallback) so English clients never depend on fallback resolution.
-    await application.bot.set_my_commands(_COMMANDS["en"])
-    await application.bot.set_my_commands(_COMMANDS["en"], language_code="en")
-    await application.bot.set_my_commands(_COMMANDS["fa"], language_code="fa")
-    # Also set the all_private_chats scope: for a DM with the bot this scope is resolved
-    # BEFORE the default one, so setting it explicitly guarantees the "/" list shows in
-    # private chats (some clients don't fall through an empty scope to the default).
-    pm = BotCommandScopeAllPrivateChats()
-    await application.bot.set_my_commands(_COMMANDS["en"], scope=pm)
-    await application.bot.set_my_commands(_COMMANDS["en"], scope=pm, language_code="en")
-    await application.bot.set_my_commands(_COMMANDS["fa"], scope=pm, language_code="fa")
+async def _prepare_polling(application):
+    """post_init hook: clear any leftover webhook (else getUpdates 409s), then set commands."""
+    await application.bot.delete_webhook(drop_pending_updates=True)
+    await set_commands(application.bot)
 
 
 class Command(BaseCommand):
@@ -99,11 +43,14 @@ class Command(BaseCommand):
                 "BOT_TOKEN is not set. Add it to your .env (get one from @BotFather)."
             )
 
-        application = (
-            ApplicationBuilder().token(settings.BOT_TOKEN).post_init(_set_commands).build()
-        )
-        register_all(application)
-        application.add_error_handler(_on_error)
+        if settings.BOT_MODE == "webhook":
+            raise CommandError(
+                "BOT_MODE=webhook, so long-polling is disabled to avoid a getUpdates/webhook "
+                "409 conflict. To poll instead, set BOT_MODE=polling (and run "
+                "`manage.py setwebhook --delete` if a webhook is still registered)."
+            )
+
+        application = build_application(post_init=_prepare_polling)
 
         logger.info("Anbar-Bot is running (polling). Ctrl+C to stop.")
         # Manages its own asyncio event loop; blocks until interrupted.

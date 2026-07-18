@@ -1,7 +1,11 @@
-"""Duplicate/near-duplicate detection for the add-product flow."""
+"""Duplicate/near-duplicate detection for the add-product flow, plus webhook-view gating."""
+
+import json
 
 import pytest
 from asgiref.sync import async_to_sync
+from django.test import Client
+from django.urls import reverse
 
 from bot.handlers.products import _normalize, _similar_products
 from inventory.models import Product
@@ -66,3 +70,41 @@ class TestSimilarProducts:
         # The blank name_en on جوجه must not match every candidate.
         hits, _ = _similar("عروسک")
         assert hits == []
+
+
+class TestWebhookGating:
+    """The webhook view must stay closed unless webhook mode is on AND the secret matches.
+
+    These cases all reject before the bot Application is built, so no BOT_TOKEN or network is
+    needed — they exercise exactly the auth gate in ``bot.views.telegram_webhook``.
+    """
+
+    def _post(self, **headers):
+        # A syntactically valid (empty) update body; gating rejects before it's ever parsed.
+        return Client().post(
+            reverse("telegram-webhook"),
+            data=json.dumps({"update_id": 1}),
+            content_type="application/json",
+            **headers,
+        )
+
+    def test_rejects_when_mode_is_polling(self, settings):
+        settings.BOT_MODE = "polling"
+        settings.BOT_TOKEN = "123:abc"
+        settings.TELEGRAM_WEBHOOK_SECRET = "s3cret"
+        assert self._post(HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="s3cret").status_code == 403
+
+    def test_rejects_when_no_secret_configured(self, settings):
+        settings.BOT_MODE = "webhook"
+        settings.BOT_TOKEN = "123:abc"
+        settings.TELEGRAM_WEBHOOK_SECRET = ""
+        assert self._post(HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="").status_code == 403
+
+    def test_rejects_wrong_secret(self, settings):
+        settings.BOT_MODE = "webhook"
+        settings.BOT_TOKEN = "123:abc"
+        settings.TELEGRAM_WEBHOOK_SECRET = "s3cret"
+        assert self._post(HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="nope").status_code == 403
+
+    def test_get_not_allowed(self):
+        assert Client().get(reverse("telegram-webhook")).status_code == 405

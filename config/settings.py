@@ -18,6 +18,8 @@ env = environ.Env(
     ALLOWED_HOSTS=(list, ["127.0.0.1", "localhost"]),
     ADMIN_IDS=(list, []),
     BOT_TOKEN=(str, ""),
+    BOT_MODE=(str, "polling"),
+    TELEGRAM_WEBHOOK_SECRET=(str, ""),
     PUBLIC_BASE_URL=(str, ""),
     INLINE_RESULT_STYLE=(str, "photo"),
     DEPLOY_SECRET=(str, ""),
@@ -33,9 +35,22 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 # Telegram
 BOT_TOKEN = env("BOT_TOKEN")
-# Public base URL of the web server (e.g. https://anbar.example.com), used by the bot to
-# build absolute photo URLs for inline-search thumbnails. Empty in dev -> inline results
-# fall back to text-only (no thumbnails). Must be reachable by Telegram/clients to show images.
+# Update delivery mode — the toggle between the two entry points (only one may be active,
+# Telegram 409s getUpdates while a webhook is set):
+#   "polling" -> `manage.py runbot` long-polls; the webhook view (bot/views.py) is inert.
+#   "webhook" -> the webhook view accepts Telegram's POSTs; `runbot` refuses to start.
+# Unknown values fall back to "polling".
+BOT_MODE = env("BOT_MODE").strip().lower()
+if BOT_MODE not in ("polling", "webhook"):
+    BOT_MODE = "polling"
+# Secret token for webhook mode: passed to Telegram at setWebhook time and echoed back in the
+# X-Telegram-Bot-Api-Secret-Token header on every request (bot/views.py checks it). Empty ->
+# the webhook view stays closed. Set to a long random string.
+TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET")
+# Public base URL of the web server (e.g. https://anbar.example.com). Two uses: the bot builds
+# absolute photo URLs for inline-search thumbnails from it, and in webhook mode it's the host
+# Telegram POSTs updates to (setwebhook targets PUBLIC_BASE_URL/telegram/webhook/). Empty in
+# dev -> inline results fall back to text-only. Must be an HTTPS URL reachable by Telegram.
 PUBLIC_BASE_URL = env("PUBLIC_BASE_URL").rstrip("/")
 # Inline-search result layout:
 #   "photo"   -> image gallery (uses cached Telegram file_ids; needs no web server)

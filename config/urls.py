@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
+from bot import views as bot_views
 from config import deploy as deploy_views
 from inventory import views as inventory_views
 
@@ -24,4 +25,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('media/variant/<int:pk>.jpg', inventory_views.variant_photo, name='variant-photo'),
     path('deploy/', deploy_views.deploy, name='deploy'),
+    # Telegram webhook (active only when BOT_MODE=webhook; see bot/views.py). The static path
+    # is fine — the secret-token header is the authenticator.
+    path('telegram/webhook/', bot_views.telegram_webhook, name='telegram-webhook'),
 ]
