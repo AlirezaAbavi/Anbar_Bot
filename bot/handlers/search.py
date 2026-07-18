@@ -44,9 +44,14 @@ def _dkp_variant_id(query):
     return v.id if v else None
 
 
+_PER = keyboards.PAGE_SIZE
+
+
 @sync_to_async
-def _search(query):
-    return list(search_products(query))
+def _search(query, page=0):
+    """One page of matching products, plus whether a further page exists."""
+    items = list(search_products(query, limit=_PER + 1, offset=page * _PER))
+    return items[:_PER], len(items) > _PER
 
 
 async def do_search(update, context):
@@ -62,17 +67,46 @@ async def do_search(update, context):
             await send_variant_card(update, context, variant, user)
             return ConversationHandler.END
 
-    products = await _search(query)
+    products, has_next = await _search(query, 0)
     if not products:
         await update.effective_message.reply_text(
             i18n.t("common.not_found", lang), reply_markup=keyboards.back_button(lang)
         )
         return ConversationHandler.END
+    # Keep the query so the pager (a callback, outside this conversation) can re-run it.
+    context.user_data["search_query"] = query
     await update.effective_message.reply_text(
         i18n.t("search.results", lang),
-        reply_markup=keyboards.product_results(products, lang, query=query),
+        reply_markup=keyboards.product_results(
+            products, lang, query=query, page_cb="pg:s", page=0, has_next=has_next
+        ),
     )
     return ConversationHandler.END
+
+
+async def page_search(update, context):
+    """Page through search results. Runs outside the conversation (it has already ended);
+    the query is read back from user_data, falling back to the un-filtered list."""
+    cq = update.callback_query
+    await cq.answer()
+    user = await get_user(update.effective_user.id)
+    if not user or not user.has_role(Role.VIEWER):
+        return
+    lang = user.language
+    page = int(cq.data.split(":")[2])
+    query = context.user_data.get("search_query", "")
+    products, has_next = await _search(query, page)
+    if not products:
+        await show_or_edit(update, context, i18n.t("common.not_found", lang), keyboards.back_button(lang))
+        return
+    await show_or_edit(
+        update,
+        context,
+        i18n.t("search.results", lang),
+        keyboards.product_results(
+            products, lang, query=query, page_cb="pg:s", page=page, has_next=has_next
+        ),
+    )
 
 
 async def cancel(update, context):
@@ -93,3 +127,5 @@ def register(application):
         fallbacks=[CommandHandler("cancel", cancel), *menu_fallbacks()],
     )
     application.add_handler(conv)
+    # Paging the results is a plain callback outside the (now-ended) conversation.
+    application.add_handler(CallbackQueryHandler(page_search, pattern=r"^pg:s:\d+$"))

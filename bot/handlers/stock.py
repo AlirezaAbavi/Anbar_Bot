@@ -98,14 +98,19 @@ def _dkp_variant_id(query):
     return v.id if v else None
 
 
-@sync_to_async
-def _search(query):
-    return list(search_products(query))
+_PER = keyboards.PAGE_SIZE
 
 
 @sync_to_async
-def _variants_of(product_id):
-    return list(product_variants(product_id))
+def _search(query, page=0):
+    items = list(search_products(query, limit=_PER + 1, offset=page * _PER))
+    return items[:_PER], len(items) > _PER
+
+
+@sync_to_async
+def _variants_of(product_id, page=0):
+    items = list(product_variants(product_id, limit=_PER + 1, offset=page * _PER))
+    return items[:_PER], len(items) > _PER
 
 
 async def picked_search(update, context):
@@ -118,15 +123,34 @@ async def picked_search(update, context):
         context.user_data["variant_id"] = vid
         return await _ask_qty(update, context)
 
-    products = await _search(query)
+    products, has_next = await _search(query, 0)
     if not products:
         await update.effective_message.reply_text(
             i18n.t("common.not_found", lang), reply_markup=keyboards.main_menu_button(lang)
         )
         return PICK
+    context.user_data["stock_query"] = query  # kept so the picker's pager can re-run it
     await update.effective_message.reply_text(
         i18n.t("stock.choose_product", lang),
-        reply_markup=keyboards.product_picker(products, lang, context.user_data["short"]),
+        reply_markup=keyboards.product_picker(
+            products, lang, context.user_data["short"], page=0, has_next=has_next
+        ),
+    )
+    return PRODUCT
+
+
+async def page_products(update, context):
+    """Page the product picker (PRODUCT state), editing the picker message in place."""
+    await update.callback_query.answer()
+    lang = context.user_data.get("lang", "fa")
+    short = context.user_data.get("short", "in")
+    page = int(update.callback_query.data.split(":")[3])
+    products, has_next = await _search(context.user_data.get("stock_query", ""), page)
+    await show_or_edit(
+        update,
+        context,
+        i18n.t("stock.choose_product", lang),
+        keyboards.product_picker(products, lang, short, page=page, has_next=has_next),
     )
     return PRODUCT
 
@@ -135,19 +159,39 @@ async def picked_product(update, context):
     await update.callback_query.answer()
     lang = context.user_data.get("lang", "fa")
     product_id = int(update.callback_query.data.split(":")[2])
-    variants = await _variants_of(product_id)
+    context.user_data["stock_product_id"] = product_id
+    variants, has_next = await _variants_of(product_id, 0)
     if not variants:
         await update.callback_query.message.reply_text(
             i18n.t("common.not_found", lang), reply_markup=keyboards.main_menu_button(lang)
         )
         return PRODUCT
-    if len(variants) == 1:
+    if len(variants) == 1 and not has_next:
         # Single (default) variant — skip the one-item picker.
         context.user_data["variant_id"] = variants[0].id
         return await _ask_qty(update, context)
     await update.callback_query.message.reply_text(
         i18n.t("stock.pick_variant", lang),
-        reply_markup=keyboards.variant_picker(variants, lang, context.user_data["short"]),
+        reply_markup=keyboards.variant_picker(
+            variants, lang, context.user_data["short"], product_id=product_id, has_next=has_next
+        ),
+    )
+    return VARIANT
+
+
+async def page_variants(update, context):
+    """Page the variant picker (VARIANT state), editing the picker message in place."""
+    await update.callback_query.answer()
+    lang = context.user_data.get("lang", "fa")
+    short = context.user_data.get("short", "in")
+    _, _, _short, product_id, page = update.callback_query.data.split(":")
+    product_id, page = int(product_id), int(page)
+    variants, has_next = await _variants_of(product_id, page)
+    await show_or_edit(
+        update,
+        context,
+        i18n.t("stock.pick_variant", lang),
+        keyboards.variant_picker(variants, lang, short, product_id=product_id, page=page, has_next=has_next),
     )
     return VARIANT
 
@@ -313,8 +357,14 @@ def register(application):
         ],
         states={
             PICK: [MessageHandler(filters.TEXT & ~filters.COMMAND, picked_search)],
-            PRODUCT: [CallbackQueryHandler(picked_product, pattern=r"^pick:(in|out):\d+$")],
-            VARIANT: [CallbackQueryHandler(selected_variant, pattern=r"^(in|out):\d+$")],
+            PRODUCT: [
+                CallbackQueryHandler(page_products, pattern=r"^pg:pp:(in|out):\d+$"),
+                CallbackQueryHandler(picked_product, pattern=r"^pick:(in|out):\d+$"),
+            ],
+            VARIANT: [
+                CallbackQueryHandler(page_variants, pattern=r"^pg:pv:(in|out):\d+:\d+$"),
+                CallbackQueryHandler(selected_variant, pattern=r"^(in|out):\d+$"),
+            ],
             QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, entered_qty)],
             BUY: [MessageHandler(filters.TEXT & ~filters.COMMAND, entered_buy)],
             SELL: [MessageHandler(filters.TEXT & ~filters.COMMAND, entered_sell)],

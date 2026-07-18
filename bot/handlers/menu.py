@@ -57,6 +57,12 @@ def _end_active_flows(update):
             pass
 
 
+async def noop(update, context):
+    """Answer an inert callback (the page-indicator button on a pager row) so the client's
+    loading spinner clears; nothing else to do."""
+    await update.callback_query.answer()
+
+
 async def menu_preempt(update, context):
     """A main-menu tap ends any in-progress flow, then falls through to group 0 where the
     action's own handler — or its conversation's entry point — runs on a clean slate.
@@ -73,6 +79,7 @@ def register(application):
     # Runs before the conversation handlers (group 0) so it can pre-empt them.
     application.add_handler(CallbackQueryHandler(menu_preempt, pattern=MENU_PATTERN), group=-1)
     application.add_handler(CallbackQueryHandler(help_action, pattern="^help$"))
+    application.add_handler(CallbackQueryHandler(noop, pattern="^noop$"))
     # Commands mirroring menu actions that are not wired elsewhere (/menu, /search,
     # /start, /cancel live in other modules).
     application.add_handler(CommandHandler("help", help_action))

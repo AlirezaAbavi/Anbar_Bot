@@ -16,12 +16,18 @@ def _summary():
     return inventory_summary()
 
 
+_PER = keyboards.PAGE_SIZE
+
+
 @sync_to_async
-def _low_stock():
-    return [
+def _low_stock(page=0):
+    """One page of low-stock rows, plus whether a further page exists."""
+    off = page * _PER
+    rows = [
         (v.product.name_fa, v.variant_label(), v.quantity, v.reorder_threshold)
-        for v in low_stock_variants().select_related("product")[:50]
+        for v in low_stock_variants().select_related("product")[off : off + _PER + 1]
     ]
+    return rows[:_PER], len(rows) > _PER
 
 
 async def show_reports(update, context):
@@ -48,7 +54,9 @@ async def show_low_stock(update, context):
     if not user or not user.has_role(Role.VIEWER):
         return
     lang = user.language
-    rows = await _low_stock()
+    data = update.callback_query.data
+    page = int(data.split(":")[2]) if data.startswith("pg:low:") else 0
+    rows, has_next = await _low_stock(page)
     if not rows:
         await show_or_edit(
             update, context, i18n.t("report.low_stock_none", lang), keyboards.back_button(lang)
@@ -59,10 +67,15 @@ async def show_low_stock(update, context):
         suffix = f" ({label})" if label else ""
         lines.append(f"• {name}{suffix}: {qty} / {thr}")
     await show_or_edit(
-        update, context, "\n".join(lines), keyboards.back_button(lang), parse_mode="HTML"
+        update,
+        context,
+        "\n".join(lines),
+        keyboards.paged_back("pg:low", page, has_next, lang, back_cb="reports"),
+        parse_mode="HTML",
     )
 
 
 def register(application):
     application.add_handler(CallbackQueryHandler(show_reports, pattern="^reports$"))
     application.add_handler(CallbackQueryHandler(show_low_stock, pattern="^report:low$"))
+    application.add_handler(CallbackQueryHandler(show_low_stock, pattern=r"^pg:low:\d+$"))

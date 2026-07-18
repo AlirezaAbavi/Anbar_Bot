@@ -169,25 +169,28 @@ def search_variants(query, limit=20):
     return qs.filter(matches).distinct()[:limit]
 
 
-def list_products(limit=20):
-    """Active products that have at least one active variant (for the browse list)."""
+def list_products(limit=20, offset=0):
+    """Active products that have at least one active variant (for the browse list).
+
+    ``offset``/``limit`` page the list; fetch ``limit + 1`` to detect a next page.
+    """
     return (
         Product.objects.filter(is_active=True, variants__is_active=True)
         .distinct()
-        .order_by("name_fa")[:limit]
+        .order_by("name_fa")[offset : offset + limit]
     )
 
 
-def search_products(query, limit=20):
+def search_products(query, limit=20, offset=0):
     """Search products by name (fa/en), or by a variant's color/size/DigiKala code.
 
     Returns distinct active products (each with ≥1 active variant). Mirrors the match set
-    of ``search_variants`` but collapsed to the product level.
+    of ``search_variants`` but collapsed to the product level. ``offset``/``limit`` page it.
     """
     query = (query or "").strip()
     qs = Product.objects.filter(is_active=True, variants__is_active=True)
     if not query:
-        return qs.distinct().order_by("name_fa")[:limit]
+        return qs.distinct().order_by("name_fa")[offset : offset + limit]
 
     matches = (
         Q(name_fa__icontains=query)
@@ -196,7 +199,7 @@ def search_products(query, limit=20):
         | Q(variants__size__icontains=query)
         | Q(variants__digikala_codes__code=query)
     )
-    return qs.filter(matches).distinct().order_by("name_fa")[:limit]
+    return qs.filter(matches).distinct().order_by("name_fa")[offset : offset + limit]
 
 
 def active_batches_prefetch():
@@ -216,13 +219,21 @@ def active_batches_prefetch():
     )
 
 
-def product_variants(product_id):
-    """Active variants of one product, with what the card/picker needs loaded."""
-    return (
+def product_variants(product_id, limit=None, offset=0):
+    """Active variants of one product, with what the card/picker needs loaded.
+
+    Ordered for stable pagination. With ``limit`` set, returns the ``offset``-based page
+    (fetch ``limit + 1`` to detect a next page); without it, the full ordered set.
+    """
+    qs = (
         ProductVariant.objects.filter(product_id=product_id, is_active=True)
         .select_related("product")
         .prefetch_related("digikala_codes", active_batches_prefetch())
+        .order_by("color", "size", "id")
     )
+    if limit is None:
+        return qs[offset:] if offset else qs
+    return qs[offset : offset + limit]
 
 
 def low_stock_variants():

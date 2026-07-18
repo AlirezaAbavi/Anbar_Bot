@@ -10,9 +10,15 @@ from ..models import Role, TelegramUser
 from .common import cq_answer, show_or_edit
 
 
+_PER = keyboards.PAGE_SIZE
+
+
 @sync_to_async
-def _all_users():
-    return list(TelegramUser.objects.all()[:50])
+def _all_users(page=0):
+    """One page of users (pending first), plus whether a further page exists."""
+    off = page * _PER
+    items = list(TelegramUser.objects.order_by("is_active", "id")[off : off + _PER + 1])
+    return items[:_PER], len(items) > _PER
 
 
 @sync_to_async
@@ -53,7 +59,7 @@ def _set_role(user_id, role):
     return u
 
 
-def _render(users, lang):
+def _render(users, lang, page=0, has_next=False):
     lines = [f"<b>{i18n.t('users.title', lang)}</b>"]
     rows = []
     for u in users:
@@ -65,6 +71,9 @@ def _render(users, lang):
             [InlineKeyboardButton(f"{status} {label}", callback_data=f"user:toggle:{u.id}")]
         )
         rows.append(keyboards.user_row(u, lang))
+    pager = keyboards._pager_row("pg:usr", page, has_next, lang)
+    if pager:
+        rows.append(pager)
     rows.append([InlineKeyboardButton(i18n.t("btn.back", lang), callback_data="nav:main")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
@@ -74,8 +83,11 @@ async def show_users(update, context):
     user = await get_user(update.effective_user.id)
     if not user or not user.has_role(Role.ADMIN):
         return
-    users = await _all_users()
-    text, markup = _render(users, user.language)
+    data = update.callback_query.data if update.callback_query else ""
+    page = int(data.split(":")[2]) if data.startswith("pg:usr:") else 0
+    context.user_data["users_page"] = page
+    users, has_next = await _all_users(page)
+    text, markup = _render(users, user.language, page, has_next)
     await show_or_edit(update, context, text, markup, parse_mode="HTML")
 
 
@@ -86,7 +98,7 @@ async def approve_user(update, context):
         return
     user_id = int(update.callback_query.data.split(":")[2])
     await _approve(user_id)
-    await _refresh(update, admin.language)
+    await _refresh(update, admin.language, context.user_data.get("users_page", 0))
 
 
 async def set_role(update, context):
@@ -97,12 +109,12 @@ async def set_role(update, context):
     _, _, user_id, role = update.callback_query.data.split(":")
     if role in (Role.VIEWER, Role.STAFF, Role.ADMIN):
         await _set_role(int(user_id), role)
-    await _refresh(update, admin.language)
+    await _refresh(update, admin.language, context.user_data.get("users_page", 0))
 
 
-async def _refresh(update, lang):
-    users = await _all_users()
-    text, markup = _render(users, lang)
+async def _refresh(update, lang, page=0):
+    users, has_next = await _all_users(page)
+    text, markup = _render(users, lang, page, has_next)
     try:
         await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
     except Exception:
@@ -123,11 +135,12 @@ async def toggle_active(update, context):
         )
         return
     await update.callback_query.answer()
-    await _refresh(update, admin.language)
+    await _refresh(update, admin.language, context.user_data.get("users_page", 0))
 
 
 def register(application):
     application.add_handler(CallbackQueryHandler(show_users, pattern="^users$"))
+    application.add_handler(CallbackQueryHandler(show_users, pattern=r"^pg:usr:\d+$"))
     application.add_handler(CallbackQueryHandler(approve_user, pattern="^user:approve:"))
     application.add_handler(CallbackQueryHandler(set_role, pattern="^user:role:"))
     application.add_handler(CallbackQueryHandler(toggle_active, pattern=r"^user:toggle:\d+$"))

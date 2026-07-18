@@ -96,14 +96,21 @@ async def set_language(update: Update, context):
     await send_main_menu(update, context, user)
 
 
-@sync_to_async
-def _browse_products(limit=20):
-    return list(list_products(limit))
+_PER = keyboards.PAGE_SIZE
 
 
 @sync_to_async
-def _variants_of(product_id):
-    return list(product_variants(product_id))
+def _browse_products(page):
+    """One page of the browse list, plus whether a further page exists."""
+    items = list(list_products(limit=_PER + 1, offset=page * _PER))
+    return items[:_PER], len(items) > _PER
+
+
+@sync_to_async
+def _variants_of(product_id, page=0):
+    """One page of a product's variants, plus whether a further page exists."""
+    items = list(product_variants(product_id, limit=_PER + 1, offset=page * _PER))
+    return items[:_PER], len(items) > _PER
 
 
 async def show_products(update: Update, context):
@@ -112,7 +119,8 @@ async def show_products(update: Update, context):
     if not user or not user.has_role(Role.VIEWER):
         return
     lang = user.language
-    products = await _browse_products()
+    page = _page_from(update, prefix="pg:b:")
+    products, has_next = await _browse_products(page)
     if not products:
         await show_or_edit(
             update, context, i18n.t("common.not_found", lang), keyboards.back_button(lang)
@@ -122,8 +130,16 @@ async def show_products(update: Update, context):
         update,
         context,
         i18n.t("list.pick_product", lang),
-        keyboards.product_results(products, lang, query=""),
+        keyboards.product_results(products, lang, query="", page_cb="pg:b", page=page, has_next=has_next),
     )
+
+
+def _page_from(update, prefix):
+    """Page index from a ``<prefix><n>`` callback; 0 for the un-paged entry point/command."""
+    cq = update.callback_query
+    if cq and cq.data and cq.data.startswith(prefix):
+        return int(cq.data[len(prefix):])
+    return 0
 
 
 async def show_product_variants(update: Update, context):
@@ -131,21 +147,26 @@ async def show_product_variants(update: Update, context):
     user = await get_user(update.effective_user.id)
     if not user or not user.is_active:
         return
-    product_id = int(update.callback_query.data.split(":", 1)[1])
-    await _render_product_variants(update, context, user, product_id)
+    data = update.callback_query.data
+    if data.startswith("pg:v:"):
+        _, _, product_id, page = data.split(":")
+        product_id, page = int(product_id), int(page)
+    else:
+        product_id, page = int(data.split(":", 1)[1]), 0
+    await _render_product_variants(update, context, user, product_id, page)
 
 
-async def _render_product_variants(update, context, user, product_id):
+async def _render_product_variants(update, context, user, product_id, page=0):
     """Show a product's variant list (or its card directly if it has just one).
 
     Shared by the ``p:`` callback and the inline deep-link, so both land the user in the
     same interactive list — with a working Add-variant button and In/Out on each card."""
     lang = user.language
-    variants = await _variants_of(product_id)
+    variants, has_next = await _variants_of(product_id, page)
     if not variants:
         await show_or_edit(update, context, i18n.t("common.not_found", lang))
         return
-    if len(variants) == 1:
+    if page == 0 and not has_next and len(variants) == 1:
         # Plain product with a single (default) variant — skip the one-item list.
         await send_variant_card(update, context, variants[0], user)
         return
@@ -154,7 +175,9 @@ async def _render_product_variants(update, context, user, product_id):
         update,
         context,
         i18n.t("product.variants_of", lang, name=name),
-        keyboards.product_variants(variants, lang, user=user, product_id=product_id),
+        keyboards.product_variants(
+            variants, lang, user=user, product_id=product_id, page=page, has_next=has_next
+        ),
         parse_mode="HTML",
     )
 
@@ -181,6 +204,8 @@ def register(application):
     application.add_handler(CallbackQueryHandler(nav_main, pattern="^nav:main$"))
     application.add_handler(CallbackQueryHandler(show_language, pattern="^lang$"))
     application.add_handler(CallbackQueryHandler(set_language, pattern="^lang:"))
-    application.add_handler(CallbackQueryHandler(show_products, pattern="^products$"))
-    application.add_handler(CallbackQueryHandler(show_product_variants, pattern="^p:"))
+    application.add_handler(CallbackQueryHandler(show_products, pattern=r"^products$"))
+    application.add_handler(CallbackQueryHandler(show_products, pattern=r"^pg:b:\d+$"))
+    application.add_handler(CallbackQueryHandler(show_product_variants, pattern=r"^p:\d+$"))
+    application.add_handler(CallbackQueryHandler(show_product_variants, pattern=r"^pg:v:\d+:\d+$"))
     application.add_handler(CallbackQueryHandler(show_card, pattern="^v:"))

@@ -99,6 +99,9 @@ STRINGS = {
         "en": "Tap to open the bot.",
     },
     "list.show_inline": {"fa": "🔽 نمایش به صورت کشویی", "en": "🔽 Show as dropdown"},
+    "page.prev": {"fa": "‹ قبلی", "en": "‹ Prev"},
+    "page.next": {"fa": "بعدی ›", "en": "Next ›"},
+    "page.indicator": {"fa": "صفحه {n}", "en": "Page {n}"},
     "inline.variant_count": {"fa": "{n} تنوع", "en": "{n} variants"},
 
     # --- variant card ---

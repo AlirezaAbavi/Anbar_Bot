@@ -17,6 +17,14 @@
   b:<variant_id>                list a variant's purchase batches (staff)
   be:<batch_id>                 edit a batch's prices (staff)
   bd:<batch_id> / bd:<id>:yes   delete (write off) a batch, with confirm (staff)
+  noop                          inert (page indicator on a pager row)
+  pg:b:<page>                   browse-list page
+  pg:s:<page>                   search-results page (query kept in user_data)
+  pg:v:<product_id>:<page>      a product's variant-list page
+  pg:pp:<in|out>:<page>         stock: product-picker page
+  pg:pv:<in|out>:<pid>:<page>   stock: variant-picker page
+  pg:low:<page>                 low-stock report page
+  pg:usr:<page>                 manage-users page
 
 The "show as dropdown" button in product_results has no callback_data; it uses
 switch_inline_query_current_chat to open the inline results panel in the same chat.
@@ -26,6 +34,28 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from . import i18n
 from .models import Role
+
+# How many items each list shows per page. Handlers fetch PAGE_SIZE + 1 to learn whether a
+# next page exists, then hand the trimmed page plus that flag to the builders below.
+PAGE_SIZE = 20
+
+
+def _pager_row(page_cb, page, has_next, lang):
+    """A ‹ Prev · page N · Next › row for a paginated list, or [] when there's a single page.
+
+    ``page_cb`` is the callback stem; the target page index is appended, e.g.
+    ``f'{page_cb}:{page + 1}'``. The indicator button carries a ``noop`` callback (answered
+    but otherwise inert). Callers insert this above their trailing Back/Cancel row.
+    """
+    if page == 0 and not has_next:
+        return []
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton(i18n.t("page.prev", lang), callback_data=f"{page_cb}:{page - 1}"))
+    row.append(InlineKeyboardButton(i18n.t("page.indicator", lang, n=page + 1), callback_data="noop"))
+    if has_next:
+        row.append(InlineKeyboardButton(i18n.t("page.next", lang), callback_data=f"{page_cb}:{page + 1}"))
+    return row
 
 # Single source of truth for the main menu: the keyboard below, and the mid-flow pre-emptor
 # that watches for its taps (bot/handlers/menu.py). Each entry: (action, i18n label key,
@@ -79,6 +109,17 @@ def back_button(lang):
     )
 
 
+def paged_back(page_cb, page, has_next, lang, back_cb="nav:main"):
+    """A pager row (when there's more than one page) above a single Back button — the
+    keyboard for a text list that pages, e.g. the low-stock report."""
+    rows = []
+    pager = _pager_row(page_cb, page, has_next, lang)
+    if pager:
+        rows.append(pager)
+    rows.append([InlineKeyboardButton(i18n.t("btn.back", lang), callback_data=back_cb)])
+    return InlineKeyboardMarkup(rows)
+
+
 def main_menu_button(lang):
     """A single 'return to main menu' button, for the end of finished flows."""
     return InlineKeyboardMarkup(
@@ -97,16 +138,21 @@ def language_menu():
     )
 
 
-def product_results(products, lang, query=""):
+def product_results(products, lang, query="", page_cb=None, page=0, has_next=False):
     """A list of products as tappable buttons leading to their variant lists.
 
     `query` is prefilled into the inline "show as dropdown" button so the inline
     panel reproduces the search (the search text, or "" for the browse list).
+    `page_cb` (e.g. "pg:b" or "pg:s") turns on the pager row.
     """
     rows = [
         [InlineKeyboardButton(p.display_name(lang)[:60], callback_data=f"p:{p.id}")]
         for p in products
     ]
+    if page_cb is not None:
+        pager = _pager_row(page_cb, page, has_next, lang)
+        if pager:
+            rows.append(pager)
     rows.append(
         [
             InlineKeyboardButton(
@@ -119,16 +165,21 @@ def product_results(products, lang, query=""):
     return InlineKeyboardMarkup(rows)
 
 
-def product_variants(variants, lang, user=None, product_id=None):
+def product_variants(variants, lang, user=None, product_id=None, page=0, has_next=False):
     """A product's variants as tappable buttons leading to their cards.
 
-    Admins also get an "add variant" button for this product.
+    Admins also get an "add variant" button for this product. When ``product_id`` is set the
+    variant list is pageable (pager callback ``pg:v:<product_id>``).
     """
     rows = []
     for v in variants:
         label = v.variant_label() or i18n.t("card.no_variant", lang)
         label += f"  ({v.quantity})"
         rows.append([InlineKeyboardButton(label[:60], callback_data=f"v:{v.id}")])
+    if product_id is not None:
+        pager = _pager_row(f"pg:v:{product_id}", page, has_next, lang)
+        if pager:
+            rows.append(pager)
     if user is not None and user.has_role(Role.ADMIN) and product_id is not None:
         rows.append(
             [
@@ -175,17 +226,20 @@ def variant_card_actions(variant, user, back_cb="nav:main"):
     return InlineKeyboardMarkup(rows)
 
 
-def product_picker(products, lang, short):
+def product_picker(products, lang, short, page=0, has_next=False):
     """Pick a product for a stock action ('in'/'out'); its variant is chosen next."""
     rows = [
         [InlineKeyboardButton(p.display_name(lang)[:60], callback_data=f"pick:{short}:{p.id}")]
         for p in products
     ]
+    pager = _pager_row(f"pg:pp:{short}", page, has_next, lang)
+    if pager:
+        rows.append(pager)
     rows.append([InlineKeyboardButton(i18n.t("btn.cancel", lang), callback_data="nav:main")])
     return InlineKeyboardMarkup(rows)
 
 
-def variant_picker(variants, lang, action):
+def variant_picker(variants, lang, action, product_id=None, page=0, has_next=False):
     """Pick a variant of a product for a stock action ('in'/'out')."""
     rows = [
         [
@@ -196,6 +250,10 @@ def variant_picker(variants, lang, action):
         ]
         for v in variants
     ]
+    if product_id is not None:
+        pager = _pager_row(f"pg:pv:{action}:{product_id}", page, has_next, lang)
+        if pager:
+            rows.append(pager)
     rows.append([InlineKeyboardButton(i18n.t("btn.cancel", lang), callback_data="nav:main")])
     return InlineKeyboardMarkup(rows)
 
