@@ -19,23 +19,45 @@ async def cq_answer(update):
         await update.callback_query.answer()
 
 
+async def _delete_cq_message(update):
+    """Best-effort delete of the message a tap came from.
+
+    Used at a text↔photo boundary, where the next view can't replace the current one by
+    editing (Telegram won't turn a text message into a photo or vice versa). Deleting the
+    old message so the new one takes its place keeps browse navigation to a single evolving
+    message instead of a growing stack of cards. Failures (already gone, too old) are
+    swallowed — this is cosmetic."""
+    cq = update.callback_query
+    if cq is not None and cq.message is not None:
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
+
+
 async def show_or_edit(update, context, text, markup=None, parse_mode=None):
     """Render into the message a callback came from; fall back to sending a new one.
 
     Menu and browse navigation rewrites a single message rather than growing the chat.
-    A photo message (a variant card) can't be edited into a text message, and a command
-    has no message of ours to edit — both fall back to sending.
+    A photo message (a variant card) can't be edited into a text message, so when the tap
+    came from one we delete it and send the text in its place — still a single message from
+    the user's view. A command has nothing of ours to edit and nothing to delete: just send.
 
     ``photo`` is read defensively: for an old message PTB hands back an InaccessibleMessage,
     which has no such attribute.
     """
     cq = update.callback_query
-    if cq is not None and cq.message is not None and not getattr(cq.message, "photo", None):
-        try:
-            await cq.edit_message_text(text, parse_mode=parse_mode, reply_markup=markup)
-            return
-        except BadRequest:
-            pass  # unchanged, too old, or not editable — send instead
+    if cq is not None and cq.message is not None:
+        if not getattr(cq.message, "photo", None):
+            try:
+                await cq.edit_message_text(text, parse_mode=parse_mode, reply_markup=markup)
+                return
+            except BadRequest:
+                pass  # unchanged, too old, or not editable — send instead
+        else:
+            # Source is a photo card; a text view can't replace it by editing. Drop it so
+            # the text takes its place rather than stacking below the orphaned card.
+            await _delete_cq_message(update)
     await context.bot.send_message(
         update.effective_chat.id, text, parse_mode=parse_mode, reply_markup=markup
     )
@@ -157,8 +179,70 @@ def variant_card_text(variant, lang):
     return "\n".join(lines)
 
 
-async def send_variant_card(update, context, variant, user):
-    """Send the card as a photo (if we have a cached file_id) or plain text.
+async def _send_photo_card(update, context, product, caption, markup):
+    """Send ``product``'s photo carrying ``caption`` + ``markup``, or a plain text message
+    when it has no photo. On the first send of a blob-only product (e.g. one seeded by
+    import_catalog, which fills ``photo_data`` but not ``telegram_file_id``) the in-DB JPEG
+    bytes are uploaded and the file_id Telegram returns is cached so later sends reuse it."""
+    chat = update.effective_chat
+    file_id = product.telegram_file_id
+    if file_id:
+        await context.bot.send_photo(
+            chat.id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=markup
+        )
+    elif product.photo_data:
+        msg = await context.bot.send_photo(
+            chat.id,
+            photo=bytes(product.photo_data),
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+        if msg.photo:
+            await sync_to_async(_cache_product_file_id)(product.pk, msg.photo[-1].file_id)
+    else:
+        await context.bot.send_message(
+            chat.id, caption, parse_mode="HTML", reply_markup=markup
+        )
+
+
+async def show_product_card(update, context, product, caption, markup):
+    """Render ``caption`` + ``markup`` on ``product``'s photo card (used for the variant
+    list, so the picture shows *before* a variant is picked).
+
+    A callback whose message is already this photo (paging, or Back from a variant card)
+    edits its caption + keyboard in place. Otherwise the tap crossed a text→photo boundary
+    (entering the product from the text list): the old text message is deleted and a fresh
+    photo card sent in its place, so navigation stays one message rather than stacking. A
+    product with no photo falls back to a plain text message so browse-style navigation
+    still edits in place.
+    """
+    cq = update.callback_query
+    if cq is not None and cq.message is not None and getattr(cq.message, "photo", None):
+        try:
+            await cq.edit_message_caption(
+                caption=caption, parse_mode="HTML", reply_markup=markup
+            )
+            return
+        except BadRequest:
+            pass  # unchanged, too old, or not editable — send instead
+    if product.telegram_file_id or product.photo_data:
+        # A photo card can't replace a text message (the product list) by editing; delete
+        # that tapped message so the card takes its place instead of stacking below it.
+        await _delete_cq_message(update)
+        await _send_photo_card(update, context, product, caption, markup)
+    else:
+        # Photo-less product: the variant list is plain text, so edit it in place.
+        await show_or_edit(update, context, caption, markup, parse_mode="HTML")
+
+
+async def send_variant_card(update, context, variant, user, with_photo=True):
+    """Send the variant detail card.
+
+    ``with_photo`` sends the product picture with the card as its caption — used when the
+    card is the first product-level view (a single-variant product, a DKP jump, an inline
+    deep-link). Drilling in from a product's variant list passes ``with_photo=False``: the
+    picture already showed on that list, so the card is text-only.
 
     When reached from an inline-mode message (a variant button on an inline product
     result), there is no chat to reply into — edit that message in place to the card
@@ -181,32 +265,34 @@ async def send_variant_card(update, context, variant, user):
     siblings = await _active_sibling_count(variant.product_id)
     back_cb = f"p:{variant.product_id}" if siblings > 1 else "products"
     markup = keyboards.variant_card_actions(variant, user, back_cb=back_cb)
-    file_id = variant.product.telegram_file_id
 
-    chat = update.effective_chat
-    if file_id:
-        await context.bot.send_photo(
-            chat.id, photo=file_id, caption=text, parse_mode="HTML", reply_markup=markup
-        )
-    elif variant.product.photo_data:
-        # No cached Telegram file_id yet (e.g. products seeded via import_catalog, which
-        # fills photo_data but not telegram_file_id): upload the in-DB JPEG bytes, then
-        # remember the file_id Telegram assigns so later sends reuse its cache instead of
-        # re-uploading the blob every time.
-        msg = await context.bot.send_photo(
-            chat.id,
-            photo=bytes(variant.product.photo_data),
-            caption=text,
-            parse_mode="HTML",
-            reply_markup=markup,
-        )
-        if msg.photo:
-            await sync_to_async(_cache_product_file_id)(
-                variant.product_id, msg.photo[-1].file_id
-            )
+    # Drilling in from the product's own message (``with_photo=False`` — the picture
+    # already showed on the variant list): rewrite THAT message into the card instead of
+    # sending a new one, so tapping variants and Back stays a single evolving message. The
+    # card shares the product's photo, so a photo list edits its caption; a photo-less
+    # product's text list edits its text.
+    if not with_photo and cq is not None and cq.message is not None:
+        if getattr(cq.message, "photo", None):
+            try:
+                await cq.edit_message_caption(
+                    caption=text, parse_mode="HTML", reply_markup=markup
+                )
+                return
+            except BadRequest:
+                pass  # too old / not editable — fall through to a fresh send
+        else:
+            await show_or_edit(update, context, text, markup, parse_mode="HTML")
+            return
+
+    if with_photo:
+        # First product-level view (single-variant product, DKP jump, inline deep-link).
+        # When it came from a tap on a text list, delete that list so the photo card
+        # replaces it rather than stacking below.
+        await _delete_cq_message(update)
+        await _send_photo_card(update, context, variant.product, text, markup)
     else:
         await context.bot.send_message(
-            chat.id, text, parse_mode="HTML", reply_markup=markup
+            update.effective_chat.id, text, parse_mode="HTML", reply_markup=markup
         )
 
 

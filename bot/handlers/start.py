@@ -9,7 +9,14 @@ from inventory.services import list_products, product_variants
 from .. import i18n, keyboards
 from ..auth import get_or_create_user, get_user, list_admins
 from ..models import Language, Role
-from .common import cq_answer, load_variant, send_main_menu, send_variant_card, show_or_edit
+from .common import (
+    cq_answer,
+    load_variant,
+    send_main_menu,
+    send_variant_card,
+    show_or_edit,
+    show_product_card,
+)
 
 
 async def start(update: Update, context):
@@ -171,14 +178,14 @@ async def _render_product_variants(update, context, user, product_id, page=0):
         await send_variant_card(update, context, variants[0], user)
         return
     name = variants[0].product.display_name(lang)
-    await show_or_edit(
+    await show_product_card(
         update,
         context,
+        variants[0].product,
         i18n.t("product.variants_of", lang, name=name),
         keyboards.product_variants(
             variants, lang, user=user, product_id=product_id, page=page, has_next=has_next
         ),
-        parse_mode="HTML",
     )
 
 
@@ -195,7 +202,8 @@ async def show_card(update: Update, context):
         await cq.answer(i18n.t("common.not_found", user.language), show_alert=True)
         return
     await cq.answer()
-    await send_variant_card(update, context, variant, user)
+    # The picture already showed on this product's variant list — the card is text-only.
+    await send_variant_card(update, context, variant, user, with_photo=False)
 
 
 def register(application):
