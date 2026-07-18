@@ -20,6 +20,8 @@ env = environ.Env(
     BOT_TOKEN=(str, ""),
     PUBLIC_BASE_URL=(str, ""),
     INLINE_RESULT_STYLE=(str, "photo"),
+    DEPLOY_SECRET=(str, ""),
+    WSGI_RELOAD_PATH=(str, ""),
 )
 # Read .env if present (dev). In prod, real environment variables take precedence.
 environ.Env.read_env(BASE_DIR / ".env")
@@ -56,6 +58,14 @@ for _raw in env("ADMIN_IDS"):
             f"ADMIN_IDS entry {_raw!r} is not a numeric Telegram id and was ignored. "
             "Use your numeric id (get it from @userinfobot), not your @username."
         )
+
+# --- Deploy webhook --------------------------------------------------------------
+# Shared secret for the CI-triggered deploy endpoint (config/deploy.py). Empty ->
+# the endpoint is disabled. Set to a long random string matching the GitHub secret.
+DEPLOY_SECRET = env("DEPLOY_SECRET")
+# Absolute path to touch to reload the web worker after a deploy. On PythonAnywhere
+# this is /var/www/<domain>_wsgi.py. Empty -> the reload step is skipped (e.g. in dev).
+WSGI_RELOAD_PATH = env("WSGI_RELOAD_PATH")
 
 # --- Applications ----------------------------------------------------------------
 INSTALLED_APPS = [

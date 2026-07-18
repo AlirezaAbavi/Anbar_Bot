@@ -15,6 +15,9 @@ db.sqlite3-journal
 # Secrets
 .env
 
+# Deploy webhook lock (config/deploy.py)
+.deploy.lock
+
 # IDE / OS
 .idea/
 .DS_Store

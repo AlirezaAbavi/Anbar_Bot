@@ -17,9 +17,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
+from config import deploy as deploy_views
 from inventory import views as inventory_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('media/variant/<int:pk>.jpg', inventory_views.variant_photo, name='variant-photo'),
+    path('deploy/', deploy_views.deploy, name='deploy'),
 ]

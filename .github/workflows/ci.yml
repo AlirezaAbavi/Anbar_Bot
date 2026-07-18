@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Django system checks
+        run: python manage.py check
+
+      - name: Run tests
+        run: pytest -q
+
+  deploy:
+    # Only deploy a green build that landed on master (not on PRs or feature pushes).
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger PythonAnywhere deploy
+        # DEPLOY_URL e.g. https://<user>.pythonanywhere.com/deploy/ ; DEPLOY_SECRET must
+        # match settings.DEPLOY_SECRET on the server. --fail-with-body surfaces the JSON
+        # log and fails the job on any non-2xx (a failed pull/migrate on the server).
+        run: |
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_SECRET }}" \
+            "${{ secrets.DEPLOY_URL }}"
