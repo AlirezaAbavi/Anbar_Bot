@@ -5,7 +5,7 @@ from telegram import ReplyKeyboardRemove
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler
 
-from inventory.models import ProductVariant
+from inventory.models import Product, ProductVariant
 from inventory.services import active_batches_prefetch
 
 from .. import i18n, keyboards
@@ -188,7 +188,29 @@ async def send_variant_card(update, context, variant, user):
         await context.bot.send_photo(
             chat.id, photo=file_id, caption=text, parse_mode="HTML", reply_markup=markup
         )
+    elif variant.product.photo_data:
+        # No cached Telegram file_id yet (e.g. products seeded via import_catalog, which
+        # fills photo_data but not telegram_file_id): upload the in-DB JPEG bytes, then
+        # remember the file_id Telegram assigns so later sends reuse its cache instead of
+        # re-uploading the blob every time.
+        msg = await context.bot.send_photo(
+            chat.id,
+            photo=bytes(variant.product.photo_data),
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+        if msg.photo:
+            await sync_to_async(_cache_product_file_id)(
+                variant.product_id, msg.photo[-1].file_id
+            )
     else:
         await context.bot.send_message(
             chat.id, text, parse_mode="HTML", reply_markup=markup
         )
+
+
+def _cache_product_file_id(product_id, file_id):
+    """Persist the Telegram-assigned file_id after a first blob upload, so subsequent
+    cards send by file_id (fast, no re-upload)."""
+    Product.objects.filter(pk=product_id).update(telegram_file_id=file_id)
