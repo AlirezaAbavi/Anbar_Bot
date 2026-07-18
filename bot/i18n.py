@@ -107,6 +107,7 @@ STRINGS = {
     "page.next": {"fa": "بعدی ›", "en": "Next ›"},
     "page.indicator": {"fa": "صفحه {n}", "en": "Page {n}"},
     "inline.variant_count": {"fa": "{n} تنوع", "en": "{n} variants"},
+    "inline.open": {"fa": "🧸 مشاهده ({n} تنوع)", "en": "🧸 View ({n} variants)"},
 
     # --- variant card ---
     "card.stock": {"fa": "موجودی", "en": "Stock"},

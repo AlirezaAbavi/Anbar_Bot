@@ -3,13 +3,18 @@
 Inline results are **product**-first, mirroring the in-chat browse: each result is a
 product, and its buttons list that product's variants.
 
-Buttons are **deep-links** into the bot's private chat (``t.me/<bot>?start=…``), not
-callbacks. A callback from an inline-mode message has no chat context and cannot drive a
+Each result carries a **single** deep-link button opening the product in the bot DM, so
+inline is **product-first** exactly like the in-chat browse: pick a product from the
+dropdown, then land on its variant list (or straight on its card when the product has one
+variant) — never a flat list of every variant up front.
+
+The button is a **deep-link** into the bot's private chat (``t.me/<bot>?start=…``), not a
+callback. A callback from an inline-mode message has no chat context and cannot drive a
 ``ConversationHandler`` (verified: PTB drops it), so the In/Out and Add-variant flows
-could never run there. Deep-links sidestep this: tapping one opens the bot DM and issues
-``/start`` with a payload (``v_<variant_id>`` → that variant's card; ``p_<product_id>`` →
-the product's variant list), which ``handlers/start._open_deeplink`` renders as a normal,
-fully-interactive in-chat message.
+could never run there. The deep-link sidesteps this: tapping it opens the bot DM and issues
+``/start p_<product_id>``, which ``handlers/start._open_deeplink`` → ``_render_product_variants``
+renders as a normal, fully-interactive variant list (with Add-variant for admins), or the
+variant card for a single-variant product — the same handler the in-chat ``p:<id>`` tap uses.
 
 Inline queries carry no message or callback_query, so we look the user up directly by
 ``from_user.id`` and answer via ``inline_query.answer``.
@@ -55,30 +60,22 @@ def _deeplink(bot_username, payload):
     return f"https://t.me/{bot_username}?start={payload}"
 
 
-def _variant_button_label(variant, lang):
-    return f"{variant.variant_label() or i18n.t('card.no_variant', lang)}  ({variant.quantity})"
+def _keyboard(product, variants, lang, bot_username):
+    """A single deep-link button opening the product's variant list in the bot DM.
 
-
-def _keyboard(product, variants, lang, user, bot_username):
-    """Deep-link buttons: one per variant, plus Add-variant for admins."""
-    rows = [
+    Product-first, mirroring the in-chat browse: tapping it runs ``/start p_<id>`` →
+    ``_render_product_variants``, which shows the variant list (Add-variant included for
+    admins) or jumps straight to the card for a single-variant product."""
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton(
-                _variant_button_label(v, lang), url=_deeplink(bot_username, f"v_{v.id}")
-            )
-        ]
-        for v in variants
-    ]
-    if user.has_role(Role.ADMIN):
-        rows.append(
             [
                 InlineKeyboardButton(
-                    i18n.t("card.btn_add_variant", lang),
+                    i18n.t("inline.open", lang, n=len(variants)),
                     url=_deeplink(bot_username, f"p_{product.id}"),
                 )
             ]
-        )
-    return InlineKeyboardMarkup(rows)
+        ]
+    )
 
 
 def _photo_url(product, variant_id):
@@ -87,14 +84,14 @@ def _photo_url(product, variant_id):
     return None
 
 
-def _build_product_result(product, lang, user, bot_username):
-    """One inline result for a product: a photo/article whose buttons deep-link into the
-    bot DM (a variant card, or the Add-variant flow)."""
+def _build_product_result(product, lang, bot_username):
+    """One inline result for a product: a photo/article whose single button deep-links into
+    the bot DM, opening the product's variant list (or its card, if it has one variant)."""
     variants = list(product.variants.all())
     title = product.list_name()
     header = i18n.t("product.variants_of", lang, name=title)
     description = i18n.t("inline.variant_count", lang, n=len(variants))
-    keyboard = _keyboard(product, variants, lang, user, bot_username)
+    keyboard = _keyboard(product, variants, lang, bot_username)
 
     if settings.INLINE_RESULT_STYLE != "article" and product.telegram_file_id:
         return InlineQueryResultCachedPhoto(
@@ -141,7 +138,7 @@ async def inline_search(update, context):
     lang = user.language
     bot_username = context.bot.username
     products = await _search(iq.query.strip())
-    results = [_build_product_result(p, lang, user, bot_username) for p in products]
+    results = [_build_product_result(p, lang, bot_username) for p in products]
     await iq.answer(results, cache_time=5, is_personal=True)
 
 
