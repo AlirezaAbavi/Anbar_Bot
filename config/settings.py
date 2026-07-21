@@ -25,6 +25,7 @@ env = environ.Env(
     DEPLOY_SECRET=(str, ""),
     WSGI_RELOAD_PATH=(str, ""),
     PYTHON_BIN=(str, ""),
+    CCE_WEBHOOK_SECRET=(str, ""),
 )
 # Read .env if present (dev). In prod, real environment variables take precedence.
 environ.Env.read_env(BASE_DIR / ".env")
@@ -85,6 +86,12 @@ WSGI_RELOAD_PATH = env("WSGI_RELOAD_PATH")
 # Interpreter used to run manage.py in the deploy step. Empty -> derived from sys.prefix.
 # Override only if that's wrong (under uWSGI sys.executable is the server binary, not python).
 PYTHON_BIN = env("PYTHON_BIN")
+
+# --- CCE webhook inspector -------------------------------------------------------
+# Optional signing secret for the throwaway /cce inspector (config/cce.py). If set, the
+# view computes the expected X-CCE-Signature (HMAC-SHA256 of the body) and shows whether
+# the presented header matches. Empty -> requests are still captured, just not verified.
+CCE_WEBHOOK_SECRET = env("CCE_WEBHOOK_SECRET")
 
 # --- Applications ----------------------------------------------------------------
 INSTALLED_APPS = [
