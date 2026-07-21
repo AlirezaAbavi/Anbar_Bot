@@ -1,5 +1,7 @@
 """Reports: summary + low-stock list."""
 
+import html
+
 from asgiref.sync import sync_to_async
 from telegram.ext import CallbackQueryHandler
 
@@ -64,8 +66,9 @@ async def show_low_stock(update, context):
         return
     lines = [f"<b>{i18n.t('report.low_stock', lang)}</b>"]
     for name, label, qty, thr in rows:
-        suffix = f" ({label})" if label else ""
-        lines.append(f"• {name}{suffix}: {qty} / {thr}")
+        # Rendered as HTML — escape the DB-sourced name/label.
+        suffix = f" ({html.escape(label)})" if label else ""
+        lines.append(f"• {html.escape(name)}{suffix}: {qty} / {thr}")
     await show_or_edit(
         update,
         context,

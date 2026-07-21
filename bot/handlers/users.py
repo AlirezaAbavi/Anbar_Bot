@@ -1,5 +1,7 @@
 """Admin user management: list users, approve, set role."""
 
+import html
+
 from asgiref.sync import sync_to_async
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler
@@ -65,7 +67,9 @@ def _render(users, lang, page=0, has_next=False):
     for u in users:
         status = "✅" if u.is_active else "⏳"
         label = u.username or u.first_name or str(u.telegram_id)
-        lines.append(f"{status} {label} — {u.role} (id {u.telegram_id})")
+        # The list is rendered as HTML; a Telegram first_name may contain "<"/"&", so escape
+        # it there. Button labels are plain text and take the raw value.
+        lines.append(f"{status} {html.escape(label)} — {u.role} (id {u.telegram_id})")
         # The name button doubles as the active/inactive toggle.
         rows.append(
             [InlineKeyboardButton(f"{status} {label}", callback_data=f"user:toggle:{u.id}")]

@@ -12,6 +12,7 @@ the field last chosen). The ``rv:reset`` confirm and ``/reviewreset`` live outsi
 conversation: the "pass complete" screen that offers them is shown after the flow has ended.
 """
 
+import html
 import logging
 
 from asgiref.sync import sync_to_async
@@ -142,16 +143,17 @@ def _card_text(product, done, total, lang):
     if not variants:
         vtext = i18n.t("review.no_variants", lang)
     else:
+        # The card renders as HTML — escape every DB-sourced value.
         vtext = "\n".join(
             i18n.t(
                 "review.variant_line",
                 lang,
-                label=_variant_label(v, lang),
+                label=html.escape(_variant_label(v, lang)),
                 qty=v.quantity,
                 buy=fmt_money(v.purchase_price),
                 sell=fmt_money(v.sale_price),
                 thr=v.reorder_threshold,
-                dkp=_dkp_str(v, lang),
+                dkp=html.escape(_dkp_str(v, lang)),
             )
             for v in variants
         )
@@ -159,9 +161,9 @@ def _card_text(product, done, total, lang):
         "review.card",
         lang,
         header=header,
-        name_fa=product.name_fa,
-        name_en=product.name_en or _dash(lang),
-        category=_cat_label(product, lang),
+        name_fa=html.escape(product.name_fa),
+        name_en=html.escape(product.name_en or _dash(lang)),
+        category=html.escape(_cat_label(product, lang)),
         variants=vtext,
     ) + product_description_block(product, lang)
 
@@ -188,13 +190,13 @@ async def _show_variant(update, context, variant_id):
     text = i18n.t(
         "review.vhub_title",
         lang,
-        name=variant.product.display_name(lang),
-        label=_variant_label(variant, lang),
+        name=html.escape(variant.product.display_name(lang)),
+        label=html.escape(_variant_label(variant, lang)),
         qty=variant.quantity,
         buy=fmt_money(variant.purchase_price),
         sell=fmt_money(variant.sale_price),
         thr=variant.reorder_threshold,
-        dkp=_dkp_str(variant, lang),
+        dkp=html.escape(_dkp_str(variant, lang)),
     )
     await show_or_edit(update, context, text, keyboards.review_variant(variant, lang), parse_mode="HTML")
     return NAV
@@ -206,7 +208,9 @@ async def _show_dkp(update, context, variant_id):
     if variant is None:
         return await _show_card(update, context)
     codes = list(variant.digikala_codes.all())
-    label = f"{variant.product.display_name(lang)} · {_variant_label(variant, lang)}"
+    label = html.escape(
+        f"{variant.product.display_name(lang)} · {_variant_label(variant, lang)}"
+    )
     text = i18n.t("review.dkp_title", lang, label=label)
     if not codes:
         text += "\n" + i18n.t("review.dkp_none", lang)
@@ -368,6 +372,13 @@ async def got_input(update, context):
             if err:
                 await update.effective_message.reply_text(i18n.t(err, lang))
             return await _show_variant(update, context, vid)
+
+        if kind == "dkp":
+            vid = edit["vid"]
+            _, err = await _add_dkp(vid, text)
+            if err:
+                await update.effective_message.reply_text(i18n.t(err, lang))
+            return await _show_dkp(update, context, vid)
     except Exception:
         # Unexpected failure applying the typed value: warn and fall back to the product card
         # rather than leaving the user stuck in INPUT with no reply.
@@ -376,13 +387,6 @@ async def got_input(update, context):
             i18n.t("common.error", lang), reply_markup=keyboards.main_menu_button(lang)
         )
         return await _show_card(update, context)
-
-    if kind == "dkp":
-        vid = edit["vid"]
-        _, err = await _add_dkp(vid, text)
-        if err:
-            await update.effective_message.reply_text(i18n.t(err, lang))
-        return await _show_dkp(update, context, vid)
 
     return await _show_card(update, context)
 

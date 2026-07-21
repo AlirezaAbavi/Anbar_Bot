@@ -24,6 +24,8 @@ file_id, else an "article" row with a thumbnail from ``/media/variant/<id>.jpg``
 ``settings.PUBLIC_BASE_URL`` is set).
 """
 
+import html
+
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db.models import Prefetch
@@ -89,7 +91,9 @@ def _build_product_result(product, lang, bot_username):
     the bot DM, opening the product's variant list (or its card, if it has one variant)."""
     variants = list(product.variants.all())
     title = product.list_name()
-    header = i18n.t("product.variants_of", lang, name=title)
+    # ``header`` is rendered as HTML (photo caption / article message); ``title`` is a plain
+    # text field, so only the header's name needs escaping.
+    header = i18n.t("product.variants_of", lang, name=html.escape(title))
     description = i18n.t("inline.variant_count", lang, n=len(variants))
     keyboard = _keyboard(product, variants, lang, bot_username)
 
