@@ -118,6 +118,28 @@ def test_search_folds_arabic_ye_kaf(db):
     assert list(search_products("كيتي")) == [p]  # Arabic ye/kaf
 
 
+@pytest.mark.parametrize(
+    "stored,query",
+    [
+        ("صادق", "سادق"),   # s-sound: ص↔س
+        ("زهرا", "ذهرا"),   # z-sound: ز↔ذ
+        ("طاها", "تاها"),   # t-sound: ط↔ت
+        ("باغ", "باق"),     # gh-sound: غ↔ق
+        ("انگری", "انکری"), # g/k: گ↔ک
+        ("پونی", "بونی"),   # p/b: پ↔ب
+        ("حنا", "هنا"),     # h-sound: ح↔ه
+        ("مسئول", "مسیول"), # hamze carrier: ئ↔ی
+    ],
+)
+def test_search_folds_homophone_groups(db, stored, query):
+    """Each folded group: a query spelled one way finds a name spelled the other."""
+    p = Product.objects.create(name_fa=stored, name_en="")
+    ProductVariant.objects.create(
+        product=p, quantity=0, reorder_threshold=1, purchase_price=1, sale_price=1
+    )
+    assert list(search_products(query)) == [p]
+
+
 def test_inventory_summary(variant, user):
     adjust_stock(variant.id, StockMovement.Type.IN, 10, user=user)
     s = inventory_summary()

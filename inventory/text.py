@@ -36,12 +36,29 @@ def normalize_fa(text):
     return re.sub(r"\s+", " ", text).strip().casefold()
 
 
-# Search-only extra folding: letters commonly swapped when transliterating a foreign name
-# into Persian. چ↔ج covers "استیچ"/"استیج" (Stitch); both fold to ج so either spelling
-# finds the other. Intentionally kept minimal — each pair risks matching unrelated words.
-_SEARCH_FOLD = str.maketrans({"چ": "ج"})
+# Search-only extra folding: letters that Persian typing/transliteration swaps freely, so
+# either spelling of a name finds the other. Deliberately biased towards *recall* (finding
+# more) at the cost of the odd unrelated match — that trade-off was chosen for this catalog
+# (foreign doll names spelled many ways). Each group folds to one representative letter;
+# direction is irrelevant since query and stored text are folded the same way.
+_SEARCH_FOLD = str.maketrans({
+    # ch/j — "استیچ"/"استیج" (Stitch)
+    "چ": "ج",
+    # same-sound letters (homophones in Persian)
+    "ذ": "ز", "ض": "ز", "ظ": "ز",   # z-sound
+    "ص": "س", "ث": "س",             # s-sound
+    "ط": "ت",                       # t-sound
+    "غ": "ق",                       # gh-sound
+    # foreign consonants transliterated inconsistently
+    "گ": "ک",                       # g/k
+    "پ": "ب",                       # p/b
+    # h-sound (ة→ه already handled by normalize_fa)
+    "ح": "ه",
+    # hamze and its ye/vav carriers
+    "ئ": "ی", "ؤ": "و", "ء": "",
+})
 
 
 def search_fold(text):
-    """Lenient fold for search: :func:`normalize_fa` plus foreign-name letter folding."""
+    """Lenient fold for search: :func:`normalize_fa` plus transliteration/homophone folding."""
     return normalize_fa(text).translate(_SEARCH_FOLD)
