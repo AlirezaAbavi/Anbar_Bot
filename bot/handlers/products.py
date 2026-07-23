@@ -1,8 +1,6 @@
 """Admin add-product conversation: product (with an optional product photo) -> one or
 more variants (with optional initial stock and DigiKala codes)."""
 
-import re
-import unicodedata
 from difflib import SequenceMatcher
 
 from asgiref.sync import sync_to_async
@@ -18,6 +16,7 @@ from telegram.ext import (
 
 from inventory.models import Category, DigikalaCode, Product, ProductVariant, StockMovement
 from inventory.services import adjust_stock
+from inventory.text import normalize_fa as _normalize
 
 from .. import i18n, keyboards
 from ..auth import get_user
@@ -87,23 +86,10 @@ def _digits(text):
 # warning the admin can dismiss in one tap, so it errs towards flagging.
 _SIMILAR_RATIO = 0.75
 
-# Arabic ye/kaf and the Persian/Arabic diacritics a keyboard may or may not emit — all
-# folded so that visually identical names compare equal.
-_CHAR_FOLD = str.maketrans({
-    "ي": "ی", "ى": "ی", "ك": "ک", "ة": "ه", "أ": "ا", "إ": "ا", "آ": "ا",
-    "‌": " ",  # ZWNJ (نیم‌فاصله) -> space
-    "‏": "", "‎": "",  # RTL/LTR marks
-})
-_DIACRITICS = re.compile(r"[ً-ْٰ]")
-
-
-def _normalize(text):
-    """Fold a product name to a comparable form: NFKC, unified Persian letters, no
-    diacritics/punctuation, collapsed whitespace, casefolded (for the English names)."""
-    text = unicodedata.normalize("NFKC", text or "").translate(_CHAR_FOLD)
-    text = _DIACRITICS.sub("", text)
-    text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
-    return re.sub(r"\s+", " ", text).strip().casefold()
+# Name folding for duplicate detection lives in ``inventory.text.normalize_fa`` (imported
+# above as ``_normalize``); it is shared with search. Note search uses the looser
+# ``search_fold`` (which also folds چ↔ج) — duplicate detection stays on the stricter fold
+# so "استیچ"/"استیج" is only a dismissable warning here, not treated as identical.
 
 
 # --- sync DB helpers ---------------------------------------------------------------

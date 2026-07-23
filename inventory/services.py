@@ -11,7 +11,7 @@ handlers) wrap them with ``asgiref.sync.sync_to_async``.
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import F, Q, Sum
+from django.db.models import F, Prefetch, Sum
 from django.utils import timezone
 
 from .models import (
@@ -22,6 +22,7 @@ from .models import (
     StockBatch,
     StockMovement,
 )
+from .text import search_fold
 
 
 class InventoryError(Exception):
@@ -149,24 +150,33 @@ def find_variant_by_dkp(code):
     return dkp.variant if dkp else None
 
 
-def search_variants(query, limit=20):
-    """Search variants by product name (fa/en) or exact DigiKala code.
+def _fold_hit(nq, *texts):
+    """True if the folded query ``nq`` is a substring of any folded ``texts``."""
+    return bool(nq) and any(nq in search_fold(t) for t in texts if t)
 
-    Returns a queryset of active ProductVariants (product prefetched).
+
+def search_variants(query, limit=20):
+    """Search variants by product name (fa/en), colour/size, or exact DigiKala code.
+
+    Matching is folded (:func:`inventory.text.search_fold`) so Persian typing variants —
+    Arabic vs Persian ye/kaf, ZWNJ, and چ↔ج ("استیچ"/"استیج") — all match. Done in Python
+    over the active set (small catalog; no portable DB-side fuzzy match). Returns a
+    queryset of active ProductVariants (product prefetched).
     """
     query = (query or "").strip()
     qs = ProductVariant.objects.filter(is_active=True).select_related("product")
     if not query:
         return qs[:limit]
 
-    matches = (
-        Q(product__name_fa__icontains=query)
-        | Q(product__name_en__icontains=query)
-        | Q(color__icontains=query)
-        | Q(size__icontains=query)
-        | Q(digikala_codes__code=query)
-    )
-    return qs.filter(matches).distinct()[:limit]
+    nq = search_fold(query)
+    candidates = qs.prefetch_related("digikala_codes")
+    ids = [
+        v.id
+        for v in candidates
+        if _fold_hit(nq, v.product.name_fa, v.product.name_en, v.color, v.size)
+        or any(query == c.code for c in v.digikala_codes.all())
+    ]
+    return qs.filter(id__in=ids)[:limit]
 
 
 def list_products(limit=20, offset=0):
@@ -192,14 +202,26 @@ def search_products(query, limit=20, offset=0):
     if not query:
         return qs.distinct().order_by("name_fa")[offset : offset + limit]
 
-    matches = (
-        Q(name_fa__icontains=query)
-        | Q(name_en__icontains=query)
-        | Q(variants__color__icontains=query)
-        | Q(variants__size__icontains=query)
-        | Q(variants__digikala_codes__code=query)
+    nq = search_fold(query)
+    active_variants = ProductVariant.objects.filter(is_active=True).prefetch_related(
+        "digikala_codes"
     )
-    return qs.filter(matches).distinct().order_by("name_fa")[offset : offset + limit]
+    candidates = (
+        qs.distinct()
+        .only("id", "name_fa", "name_en")
+        .prefetch_related(Prefetch("variants", queryset=active_variants))
+    )
+    ids = []
+    for p in candidates:
+        variants = p.variants.all()  # active only (prefetched above)
+        if (
+            _fold_hit(nq, p.name_fa, p.name_en)
+            or any(_fold_hit(nq, v.color, v.size) for v in variants)
+            or any(query == c.code for v in variants for c in v.digikala_codes.all())
+        ):
+            ids.append(p.id)
+    # Re-query so callers keep a QuerySet (e.g. inline mode chains .prefetch_related/.defer).
+    return Product.objects.filter(id__in=ids).order_by("name_fa")[offset : offset + limit]
 
 
 def active_batches_prefetch():
@@ -208,8 +230,6 @@ def active_batches_prefetch():
     Lets the card read ``variant.active_batches[0]`` (the next lot FIFO will sell) without an
     extra query per variant. Shared by the card loader and the product variant list.
     """
-    from django.db.models import Prefetch
-
     return Prefetch(
         "batches",
         queryset=StockBatch.objects.filter(quantity_remaining__gt=0).order_by(

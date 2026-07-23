@@ -19,6 +19,7 @@ from inventory.services import (
     find_variant_by_dkp,
     inventory_summary,
     low_stock_variants,
+    search_products,
     search_variants,
     set_batch_remaining,
 )
@@ -92,6 +93,29 @@ def test_search_by_name_and_dkp(variant):
     assert list(search_variants("1234567")) == [variant]
     assert find_variant_by_dkp("1234567") == variant
     assert find_variant_by_dkp("0000000") is None
+
+
+def test_search_folds_persian_transliteration(db):
+    """Typing one spelling of a foreign name finds the other: استیچ (چ) <-> استیج (ج)."""
+    cheh = Product.objects.create(name_fa="استیچ", name_en="Stitch")
+    jeem = Product.objects.create(name_fa="استیج اورجینال", name_en="Stitch orig")
+    for p in (cheh, jeem):
+        ProductVariant.objects.create(
+            product=p, quantity=0, reorder_threshold=1, purchase_price=1, sale_price=1
+        )
+    # Either spelling of the query surfaces both products.
+    for q in ("استیچ", "استیج"):
+        found = set(search_products(q).values_list("id", flat=True))
+        assert found == {cheh.id, jeem.id}, q
+
+
+def test_search_folds_arabic_ye_kaf(db):
+    """Arabic ye/kaf query matches a name stored with Persian ye/kaf (and vice versa)."""
+    p = Product.objects.create(name_fa="کیتی", name_en="Kitty")  # Persian ye/kaf
+    ProductVariant.objects.create(
+        product=p, quantity=0, reorder_threshold=1, purchase_price=1, sale_price=1
+    )
+    assert list(search_products("كيتي")) == [p]  # Arabic ye/kaf
 
 
 def test_inventory_summary(variant, user):
