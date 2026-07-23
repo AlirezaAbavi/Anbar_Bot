@@ -20,9 +20,13 @@ from django.urls import path
 from bot import views as bot_views
 from config import cce as cce_views
 from config import deploy as deploy_views
+from config import registration as registration_views
 from inventory import views as inventory_views
 
 urlpatterns = [
+    # Self-service registration, linked from the admin login page. Must precede the admin
+    # include so 'admin/register/' is matched before the admin catch-all.
+    path('admin/register/', registration_views.register, name='register'),
     path('admin/', admin.site.urls),
     path('media/variant/<int:pk>.jpg', inventory_views.variant_photo, name='variant-photo'),
     path('deploy/', deploy_views.deploy, name='deploy'),

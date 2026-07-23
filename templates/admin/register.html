@@ -1,0 +1,64 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% comment %}
+Registration form for a new admin-site account (config/registration.py). Modeled on the
+admin login template so it inherits the same styling. On success it shows a "pending
+approval" notice instead of the form.
+{% endcomment %}
+
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static "admin/css/login.css" %}">
+{{ form.media }}
+{% endblock %}
+
+{% block bodyclass %}{{ block.super }} login{% endblock %}
+
+{% block usertools %}{% endblock %}
+{% block nav-global %}{% endblock %}
+{% block nav-sidebar %}{% endblock %}
+{% block content_title %}{% endblock %}
+{% block nav-breadcrumbs %}{% endblock %}
+
+{% block content %}
+<div id="content-main">
+
+{% if registered %}
+<p>{% translate "Thanks for registering! Your account is pending approval by an administrator. You'll be able to sign in once it's been verified." %}</p>
+<div class="password-reset-link" style="text-align: center; margin-top: 1em;">
+  <a href="{{ login_url }}">{% translate 'Back to login' %}</a>
+</div>
+{% else %}
+
+{% if form.errors and not form.non_field_errors %}
+<p class="errornote">
+{% blocktranslate count counter=form.errors.items|length %}Please correct the error below.{% plural %}Please correct the errors below.{% endblocktranslate %}
+</p>
+{% endif %}
+
+{% if form.non_field_errors %}
+{% for error in form.non_field_errors %}
+<p class="errornote">{{ error }}</p>
+{% endfor %}
+{% endif %}
+
+<form action="" method="post" id="register-form">{% csrf_token %}
+  {% for field in form %}
+  <div class="form-row">
+    {{ field.errors }}
+    {{ field.label_tag }} {{ field }}
+    {% if field.help_text %}<div class="help">{{ field.help_text|safe }}</div>{% endif %}
+  </div>
+  {% endfor %}
+  <div class="submit-row">
+    <input type="submit" value="{% translate 'Register' %}">
+  </div>
+</form>
+
+<div class="password-reset-link" style="text-align: center; margin-top: 1em;">
+  <a href="{{ login_url }}">{% translate 'Back to login' %}</a>
+</div>
+
+{% endif %}
+
+</div>
+{% endblock %}
