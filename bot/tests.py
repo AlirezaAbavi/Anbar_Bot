@@ -158,11 +158,20 @@ class TestAdminRegistration:
         resp = c.get(reverse("register"))
         assert resp.status_code == 302
 
-    def test_approve_action_activates_and_grants_inventory_group(self):
+    def test_staff_group_is_predesignated(self):
+        # post_migrate (bot/apps.py) creates the group at migrate time, before any approval.
+        from django.contrib.auth.models import Group
+
+        from bot.permissions import STAFF_GROUP
+
+        assert Group.objects.filter(name=STAFF_GROUP).exists()
+
+    def test_approve_action_activates_and_grants_staff_group(self):
         from django.contrib import admin as dj_admin
         from django.contrib.auth.models import User
 
-        from bot.admin import INVENTORY_STAFF_GROUP, UserAdmin
+        from bot.admin import UserAdmin
+        from bot.permissions import STAFF_GROUP
 
         admin_user = User.objects.create_superuser("boss", password="x")
         pending = User.objects.create_user("pending", password="x", is_active=False, is_staff=True)
@@ -172,9 +181,31 @@ class TestAdminRegistration:
 
         pending.refresh_from_db()
         assert pending.is_active is True
-        assert pending.groups.filter(name=INVENTORY_STAFF_GROUP).exists()
-        # The group carries real inventory permissions.
-        assert pending.get_group_permissions() & {"inventory.change_product", "inventory.add_stockbatch"}
+        assert pending.groups.filter(name=STAFF_GROUP).exists()
+
+    def test_staff_group_permissions_are_everything_except_delete_and_critical(self):
+        from bot.permissions import ensure_staff_group
+
+        perms = {
+            f"{p.content_type.app_label}.{p.codename}"
+            for p in ensure_staff_group().permissions.select_related("content_type")
+        }
+        # Everyday work is allowed: add/change/view on inventory.
+        assert {
+            "inventory.add_product",
+            "inventory.change_productvariant",
+            "inventory.view_stockbatch",
+        } <= perms
+        # No deletes at all.
+        assert not any(p.split(".", 1)[1].startswith("delete_") for p in perms)
+        # No account-control (critical) permissions — can't create or elevate admins.
+        assert not (
+            perms
+            & {"auth.add_user", "auth.change_user", "auth.change_group", "auth.add_permission"}
+        )
+        # TelegramUser (bot roles) is view-only for staff.
+        assert "bot.view_telegramuser" in perms
+        assert not (perms & {"bot.add_telegramuser", "bot.change_telegramuser"})
 
     def test_promote_action_makes_superuser(self):
         from django.contrib import admin as dj_admin
